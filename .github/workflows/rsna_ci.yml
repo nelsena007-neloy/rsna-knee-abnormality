@@ -1,0 +1,82 @@
+name: RSNA Knee AI Production CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Linting Tools
+        run: |
+          pip install ruff mypy
+
+      - name: Run Ruff Linter & Formatter
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Static Type Checking
+        run: |
+          mypy src/ --ignore-missing-imports
+
+  model-validation-and-scoring:
+    needs: code-quality
+    runs-on: ubuntu-latest
+    container:
+      image: pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov scikit-learn pandas numpy
+
+      - name: Run Unit Tests on Multiplanar Loaders & Architectures
+        run: |
+          pytest tests/test_loaders.py tests/test_architectures.py -v
+
+      - name: Execute Loss & Gradient Propagation Tests
+        run: |
+          pytest tests/test_losses.py -v
+
+      - name: Run Validation Macro-AUC Benchmark
+        run: |
+          python -m pipelines.evaluation.eval_harness \
+            --val-data-path tests/fixtures/mock_val_data.parquet \
+            --checkpoint-path weights/baseline_model.pt \
+            --min-macro-auc 0.9000
+
+      - name: Verify Submission Schema & Boundaries
+        run: |
+          python -m pipelines.inference.inference_pipeline \
+            --input-dir tests/fixtures/mock_test_dicoms \
+            --output artifacts/submission.csv
+          
+          python -m pipelines.evaluation.validate_submission \
+            --file artifacts/submission.csv \
+            --expected-rows 50
+
+      - name: Upload Submission Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: submission-validation
+          path: artifacts/submission.csv

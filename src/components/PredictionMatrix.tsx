@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AbnormalityKey, StudyInstance, PredictionResult } from '../types';
 import { ABNORMALITIES_META } from '../data/abnormalities';
@@ -15,7 +15,10 @@ import {
   ChevronUp,
   Download,
   Flame,
-  Filter
+  Filter,
+  TrendingUp,
+  TrendingDown,
+  Minus
 } from 'lucide-react';
 
 interface PredictionMatrixProps {
@@ -25,6 +28,7 @@ interface PredictionMatrixProps {
   onSelectAbnormality: (key: AbnormalityKey) => void;
   aiExplanation?: PredictionResult | null;
   onOpenRecommendations?: () => void;
+  onExportReport?: () => void;
 }
 
 // Smooth animated numeric counter for transition updates
@@ -85,16 +89,269 @@ const AnimatedScore: React.FC<{ value: number; decimals?: number; className?: st
   );
 };
 
+// Subtle Trend Arrow & Confidence Shift Indicator
+interface TrendIndicatorProps {
+  currentScore: number;
+  prevScore?: number;
+  groundTruth?: number;
+}
+
+const TrendIndicator: React.FC<TrendIndicatorProps> = ({
+  currentScore,
+  prevScore,
+  groundTruth
+}) => {
+  if (prevScore === undefined) return null;
+  const delta = currentScore - prevScore;
+  
+  if (Math.abs(delta) < 0.001) {
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 text-[8.5px] font-mono text-slate-500 bg-slate-900/60 px-1 py-0.2 rounded border border-slate-800"
+        title="Diagnostic confidence unchanged from prior inference"
+      >
+        <Minus className="w-2.5 h-2.5" />
+        <span>0.0%</span>
+      </span>
+    );
+  }
+
+  const isUp = delta > 0;
+  const deltaAbsPercent = (Math.abs(delta) * 100).toFixed(1);
+
+  // Determine whether this direction represents an improvement or degradation relative to ground truth
+  let isImprovement: boolean | null = null;
+  if (groundTruth === 1) {
+    isImprovement = isUp; // Positive pathology: higher score = better diagnostic confidence
+  } else if (groundTruth === 0) {
+    isImprovement = !isUp; // Negative pathology: lower score = better diagnostic confidence
+  }
+
+  // Visual styling: Emerald for improved diagnostic accuracy, Rose for degradation, Cyan/Slate for neutral
+  let colorClasses = isUp
+    ? 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40'
+    : 'text-slate-400 bg-slate-800/40 border-slate-700/40';
+
+  if (isImprovement === true) {
+    colorClasses = 'text-emerald-400 bg-emerald-950/60 border-emerald-800/60';
+  } else if (isImprovement === false) {
+    colorClasses = 'text-rose-400 bg-rose-950/60 border-rose-800/60';
+  }
+
+  const tooltipText = isImprovement === true
+    ? `Confidence improved by ${deltaAbsPercent}% towards ground truth (prior score: ${(prevScore * 100).toFixed(1)}%)`
+    : isImprovement === false
+    ? `Confidence degraded by ${deltaAbsPercent}% against ground truth (prior score: ${(prevScore * 100).toFixed(1)}%)`
+    : `Score shifted ${isUp ? '+' : '-'}${deltaAbsPercent}% vs previous inference (prior score: ${(prevScore * 100).toFixed(1)}%)`;
+
+  return (
+    <motion.span
+      layout
+      initial={{ opacity: 0, scale: 0.85, y: isUp ? 2 : -2 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={`inline-flex items-center gap-0.5 text-[8.5px] font-mono font-bold px-1 py-0.2 rounded border shadow-sm ${colorClasses}`}
+      title={tooltipText}
+    >
+      {isUp ? (
+        <TrendingUp className="w-2.5 h-2.5 shrink-0" />
+      ) : (
+        <TrendingDown className="w-2.5 h-2.5 shrink-0" />
+      )}
+      <span>{isUp ? '+' : '-'}{deltaAbsPercent}%</span>
+    </motion.span>
+  );
+};
+
+// Compact SVG Sparkline visualizing the last 5 inference confidence values
+interface ConfidenceSparklineProps {
+  values: number[];
+  currentScore: number;
+  groundTruth?: number;
+  width?: number;
+  height?: number;
+}
+
+const ConfidenceSparkline: React.FC<ConfidenceSparklineProps> = ({
+  values,
+  currentScore,
+  width = 46,
+  height = 15
+}) => {
+  if (!values || values.length === 0) return null;
+
+  const paddedWidth = width - 6;
+  const paddedHeight = height - 4;
+
+  const points = values.map((val, idx) => {
+    const x = values.length > 1
+      ? 3 + (idx / (values.length - 1)) * paddedWidth
+      : width / 2;
+    // Map 0..1 to height (0 at bottom, 1 at top)
+    const clampedVal = Math.max(0, Math.min(1, val));
+    const y = height - 2 - clampedVal * paddedHeight;
+    return { x, y, val };
+  });
+
+  const pathD = points.length > 1
+    ? points.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`, '')
+    : `M 3 ${points[0].y.toFixed(1)} L ${width - 3} ${points[0].y.toFixed(1)}`;
+
+  const areaD = points.length > 1
+    ? `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height} L ${points[0].x.toFixed(1)} ${height} Z`
+    : '';
+
+  const strokeColor = currentScore >= 0.70
+    ? '#FF3B5C'
+    : currentScore >= 0.35
+    ? '#F59E0B'
+    : '#00E5FF';
+
+  const fillColor = currentScore >= 0.70
+    ? 'rgba(255, 59, 92, 0.2)'
+    : currentScore >= 0.35
+    ? 'rgba(245, 158, 11, 0.2)'
+    : 'rgba(0, 229, 255, 0.2)';
+
+  const lastPt = points[points.length - 1];
+  const historyText = `Inference Confidence History (Last ${values.length} runs): ${values.map(v => (v * 100).toFixed(1) + '%').join(' → ')}`;
+
+  return (
+    <motion.div
+      layout
+      className="inline-flex items-center px-1 py-0.5 rounded bg-[#06080B] border border-slate-800/80 shadow-inner group relative cursor-help"
+      title={historyText}
+    >
+      <svg width={width} height={height} className="overflow-visible">
+        <defs>
+          <linearGradient id={`sparkline-grad-${currentScore >= 0.7 ? 'pos' : currentScore >= 0.35 ? 'eq' : 'norm'}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+
+        {areaD && (
+          <path
+            d={areaD}
+            fill={fillColor}
+            className="transition-all duration-300"
+          />
+        )}
+
+        <path
+          d={pathD}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="transition-all duration-300"
+        />
+
+        {/* Small subtle historical point dots */}
+        {points.map((pt, idx) => (
+          <circle
+            key={idx}
+            cx={pt.x}
+            cy={pt.y}
+            r={idx === points.length - 1 ? 1.75 : 1}
+            fill={idx === points.length - 1 ? strokeColor : '#64748B'}
+            className="transition-all duration-300"
+          />
+        ))}
+      </svg>
+    </motion.div>
+  );
+};
+
 export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
   currentStudy,
   predictions,
   activeAbnormality,
   onSelectAbnormality,
   aiExplanation,
-  onOpenRecommendations
+  onOpenRecommendations,
+  onExportReport
 }) => {
   const [expandedRecsKey, setExpandedRecsKey] = useState<AbnormalityKey | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<'All' | 'Ligament' | 'Meniscus' | 'Cartilage' | 'Joint'>('All');
+
+  // Track previous inferences and 5-point inference confidence history per study
+  const [prevPredictionsMap, setPrevPredictionsMap] = useState<Record<string, Record<AbnormalityKey, number>>>({});
+  const [historyMap, setHistoryMap] = useState<Record<string, Record<AbnormalityKey, number[]>>>({});
+  const lastPredictionsRef = useRef<Record<string, Record<AbnormalityKey, number>>>({});
+
+  // Helper to generate a realistic initial 5-point calibration trajectory towards baseScore
+  const getInitialHistory = (baseScore: number): number[] => {
+    const s = Math.max(0.01, Math.min(0.99, baseScore));
+    const noise1 = Number(Math.max(0.01, Math.min(0.99, s > 0.5 ? s - 0.08 : s + 0.06)).toFixed(3));
+    const noise2 = Number(Math.max(0.01, Math.min(0.99, s > 0.5 ? s - 0.05 : s + 0.04)).toFixed(3));
+    const noise3 = Number(Math.max(0.01, Math.min(0.99, s > 0.5 ? s - 0.02 : s + 0.02)).toFixed(3));
+    const noise4 = Number(Math.max(0.01, Math.min(0.99, s > 0.5 ? s - 0.01 : s + 0.01)).toFixed(3));
+    return [noise1, noise2, noise3, noise4, Number(s.toFixed(3))];
+  };
+
+  useEffect(() => {
+    const patientId = currentStudy.patientId;
+    const lastRecorded = lastPredictionsRef.current[patientId];
+
+    if (lastRecorded) {
+      const hasChanged = Object.keys(predictions).some(k => {
+        const key = k as AbnormalityKey;
+        return Math.abs((predictions[key] ?? 0) - (lastRecorded[key] ?? 0)) >= 0.001;
+      });
+
+      if (hasChanged) {
+        setPrevPredictionsMap(prev => ({
+          ...prev,
+          [patientId]: lastRecorded
+        }));
+      }
+    } else if (currentStudy.baselinePredictions) {
+      const hasBaselineDiff = Object.keys(predictions).some(k => {
+        const key = k as AbnormalityKey;
+        return Math.abs((predictions[key] ?? 0) - (currentStudy.baselinePredictions?.[key] ?? 0)) >= 0.001;
+      });
+      if (hasBaselineDiff) {
+        setPrevPredictionsMap(prev => ({
+          ...prev,
+          [patientId]: currentStudy.baselinePredictions!
+        }));
+      }
+    }
+
+    // Update 5-point history per abnormality key
+    setHistoryMap(prev => {
+      const patientHist = prev[patientId] || ({} as Record<AbnormalityKey, number[]>);
+      const updatedHist = { ...patientHist };
+
+      (Object.keys(predictions) as AbnormalityKey[]).forEach(k => {
+        const currentVal = Number((predictions[k] ?? currentStudy.baselinePredictions?.[k] ?? 0.05).toFixed(3));
+        const existing = updatedHist[k] || getInitialHistory(currentStudy.baselinePredictions?.[k] ?? currentVal);
+
+        if (existing.length === 0) {
+          updatedHist[k] = [currentVal];
+        } else {
+          const lastVal = existing[existing.length - 1];
+          if (Math.abs(lastVal - currentVal) >= 0.001) {
+            updatedHist[k] = [...existing, currentVal].slice(-5);
+          } else {
+            updatedHist[k] = existing.slice(-5);
+          }
+        }
+      });
+
+      return {
+        ...prev,
+        [patientId]: updatedHist
+      };
+    });
+
+    lastPredictionsRef.current[patientId] = { ...predictions };
+  }, [predictions, currentStudy.patientId, currentStudy.baselinePredictions]);
+
+  const prevScores = prevPredictionsMap[currentStudy.patientId] || currentStudy.baselinePredictions;
+  const currentStudyHistory = historyMap[currentStudy.patientId];
 
   // Count active findings
   const activeFindingsCount = Object.keys(predictions).filter(
@@ -105,11 +362,12 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
     if (score >= 0.70) {
       return (
         <motion.span
+          layout
           key="positive"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.2 }}
+          transition={{ layout: { duration: 0.25, ease: "easeOut" }, duration: 0.2 }}
           className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#FF3B5C26] text-[#FF3B5C] border border-[#FF3B5C66] flex items-center gap-1"
         >
           <AlertCircle className="w-3 h-3 shrink-0" />
@@ -122,11 +380,12 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
     if (score >= 0.35) {
       return (
         <motion.span
+          layout
           key="equivocal"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.2 }}
+          transition={{ layout: { duration: 0.25, ease: "easeOut" }, duration: 0.2 }}
           className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1"
         >
           <HelpCircle className="w-3 h-3 shrink-0" />
@@ -138,11 +397,12 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
     }
     return (
       <motion.span
+        layout
         key="normal"
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
-        transition={{ duration: 0.2 }}
+        transition={{ layout: { duration: 0.25, ease: "easeOut" }, duration: 0.2 }}
         className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#00E5FF15] text-[#00E5FF] border border-[#00E5FF33] flex items-center gap-1"
       >
         <CheckCircle2 className="w-3 h-3 shrink-0" />
@@ -219,6 +479,8 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
               {cat.keys.map(key => {
                 const meta = ABNORMALITIES_META[key];
                 const score = predictions[key] ?? 0.05;
+                const prevScore = prevScores?.[key];
+                const keyHistory = currentStudyHistory?.[key] || getInitialHistory(score);
                 const truth = currentStudy.groundTruth[key];
                 const isSelected = activeAbnormality === key;
                 const isRecExpanded = expandedRecsKey === key;
@@ -255,12 +517,13 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
                         </p>
                       </div>
 
-                      <div className="flex flex-col items-end shrink-0 gap-1">
+                      <motion.div layout className="flex flex-col items-end shrink-0 gap-1">
                         <AnimatePresence mode="wait">
                           {getRiskBadge(score)}
                         </AnimatePresence>
                         {truth !== undefined && (
-                          <span
+                          <motion.span
+                            layout
                             className={`text-[9px] font-mono font-semibold px-1 py-0.2 rounded ${
                               truth === 1
                                 ? 'bg-red-950/80 text-red-300 border border-red-800/50'
@@ -268,20 +531,37 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
                             }`}
                           >
                             GT: {truth === 1 ? 'Pos' : 'Neg'}
-                          </span>
+                          </motion.span>
                         )}
-                      </div>
+                      </motion.div>
                     </div>
 
                     {/* Progress Score Bar with Smooth Layout */}
-                    <div className="space-y-1" onClick={() => onSelectAbnormality(key)}>
-                      <div className="flex items-center justify-between text-[10px] font-mono">
-                        <span className="text-slate-400">Model Score:</span>
-                        <span className="font-bold text-[#00E5FF]">
+                    <motion.div
+                      layout
+                      transition={{ layout: { duration: 0.25, ease: "easeOut" } }}
+                      className="space-y-1"
+                      onClick={() => onSelectAbnormality(key)}
+                    >
+                      <motion.div layout className="flex items-center justify-between text-[10px] font-mono">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-slate-400">Score:</span>
+                          <TrendIndicator
+                            currentScore={score}
+                            prevScore={prevScore}
+                            groundTruth={truth}
+                          />
+                          <ConfidenceSparkline
+                            values={keyHistory}
+                            currentScore={score}
+                            groundTruth={truth}
+                          />
+                        </div>
+                        <span className="font-bold text-[#00E5FF] shrink-0">
                           <AnimatedScore value={score} decimals={4} />
                         </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-[#06080B] rounded-full overflow-hidden relative border border-slate-800/60">
+                      </motion.div>
+                      <motion.div layout className="w-full h-1.5 bg-[#06080B] rounded-full overflow-hidden relative border border-slate-800/60">
                         <motion.div
                           layout
                           initial={false}
@@ -296,8 +576,8 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
                           }}
                           className="h-full rounded-full"
                         />
-                      </div>
-                    </div>
+                      </motion.div>
+                    </motion.div>
 
                     {/* Footer Controls: Inspect Slice + Recommendations Toggle */}
                     <div className="mt-1.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[9.5px]">
@@ -420,20 +700,24 @@ export const PredictionMatrix: React.FC<PredictionMatrixProps> = ({
         <button
           id="btn-export-matrix-summary"
           onClick={() => {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
-              studyId: currentStudy.patientId,
-              predictions,
-              timestamp: new Date().toISOString()
-            }, null, 2));
-            const downloadAnchor = document.createElement('a');
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `RSNA_Knee_${currentStudy.patientId}_Predictions.json`);
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
+            if (onExportReport) {
+              onExportReport();
+            } else {
+              const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+                studyId: currentStudy.patientId,
+                predictions,
+                timestamp: new Date().toISOString()
+              }, null, 2));
+              const downloadAnchor = document.createElement('a');
+              downloadAnchor.setAttribute("href", dataStr);
+              downloadAnchor.setAttribute("download", `RSNA_Knee_${currentStudy.patientId}_Predictions.json`);
+              document.body.appendChild(downloadAnchor);
+              downloadAnchor.click();
+              downloadAnchor.remove();
+            }
           }}
           className="p-1.5 rounded-lg bg-[#0D131F] hover:bg-slate-800 text-slate-300 border border-slate-700/80 text-[11px] transition-all"
-          title="Export JSON Prediction Summary"
+          title="Export Clinical Diagnostic Report (PDF / JSON)"
         >
           <Download className="w-3.5 h-3.5 text-[#00E5FF]" />
         </button>

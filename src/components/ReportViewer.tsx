@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { StudyInstance, AbnormalityKey } from '../types';
-import { FileText, Edit3, CheckCircle2, Sparkles, CornerDownRight, AlertCircle, Sparkle } from 'lucide-react';
+import { FileText, Edit3, CheckCircle2, Sparkles, CornerDownRight, AlertCircle, Sparkle, Download } from 'lucide-react';
 
 interface ReportViewerProps {
   study: StudyInstance;
   onSelectAbnormality: (key: AbnormalityKey) => void;
   activeAbnormality?: AbnormalityKey | null;
   onCustomReportAnalyze?: (customReport: string) => void;
+  onExportReport?: () => void;
   isAnalyzing?: boolean;
 }
 
@@ -15,6 +16,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({
   onSelectAbnormality,
   activeAbnormality,
   onCustomReportAnalyze,
+  onExportReport,
   isAnalyzing
 }) => {
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -40,14 +42,28 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({
           </div>
         </div>
 
-        <button
-          id="btn-toggle-report-edit"
-          onClick={() => setIsEditing(prev => !prev)}
-          className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-[#0D131F] hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-colors shrink-0"
-        >
-          <Edit3 className="w-3 h-3 text-[#00E5FF]" />
-          <span>{isEditing ? 'View Report' : 'Edit Text'}</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onExportReport && (
+            <button
+              id="btn-report-viewer-export"
+              onClick={onExportReport}
+              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-[#00E5FF10] hover:bg-[#00E5FF22] text-[#00E5FF] border border-[#00E5FF44] transition-colors"
+              title="Export Clinical Diagnostic Report"
+            >
+              <Download className="w-3 h-3" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+          )}
+
+          <button
+            id="btn-toggle-report-edit"
+            onClick={() => setIsEditing(prev => !prev)}
+            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-[#0D131F] hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-colors"
+          >
+            <Edit3 className="w-3 h-3 text-[#00E5FF]" />
+            <span>{isEditing ? 'View Report' : 'Edit Text'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Sub-Header Meta Bar: Compact dark grid displaying Case # | 24yo M | 3.0T Magnet */}

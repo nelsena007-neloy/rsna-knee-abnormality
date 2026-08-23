@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ViewPlane, MriSlice, AbnormalityKey } from '../types';
 import { ABNORMALITIES_META } from '../data/abnormalities';
-import { WL_PRESETS, getFilterStyles } from '../utils/mriRenderer';
+import { WL_PRESETS, getFilterStyles, WindowLevelPreset } from '../utils/mriRenderer';
 import {
   ZoomIn,
   ZoomOut,
@@ -17,7 +17,14 @@ import {
   ChevronRight,
   Info,
   Layers,
-  Move
+  Move,
+  SlidersHorizontal,
+  ShieldAlert,
+  Sparkle,
+  X,
+  Check,
+  Zap,
+  Activity
 } from 'lucide-react';
 
 interface MriViewerProps {
@@ -40,7 +47,10 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   onSelectAbnormality
 }) => {
   const [sliceIndex, setSliceIndex] = useState<number>(12);
-  const [wlPreset, setWlPreset] = useState<string>('Default');
+  const [wlPreset, setWlPreset] = useState<string>('SoftTissue');
+  const [customWw, setCustomWw] = useState<number | null>(null);
+  const [customWl, setCustomWl] = useState<number | null>(null);
+  const [showWlControls, setShowWlControls] = useState<boolean>(false);
   const [invert, setInvert] = useState<boolean>(false);
   const [showHeatmap, setShowHeatmap] = useState<boolean>(true);
   const [showAnnotations, setShowAnnotations] = useState<boolean>(true);
@@ -57,7 +67,20 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   const totalSlices = activeSliceList.length || 20;
   const currentSliceData = activeSliceList[Math.min(sliceIndex - 1, totalSlices - 1)] || activeSliceList[0];
 
-  // Auto-jump to relevant slice if an abnormality with primary plane is selected
+  const currentPresetData = WL_PRESETS[wlPreset] || WL_PRESETS.SoftTissue;
+  const activeWw = customWw ?? currentPresetData.windowWidth;
+  const activeWl = customWl ?? currentPresetData.windowLevel;
+
+  // Helper to recommend preset based on selected knee pathology
+  const getRecommendedPreset = (key: AbnormalityKey): string => {
+    if (['ACL', 'PCL', 'MM', 'LM', 'MCL', 'LCL'].includes(key)) return 'SoftTissue';
+    if (['BONE_CONTUSION', 'FRACTURE', 'PATELLAR_TRACKING'].includes(key)) return 'Bone';
+    if (['EFFUSION', 'BAKER_CYST'].includes(key)) return 'STIR';
+    if (['CARTILAGE', 'CARTILAGE_MEDIAL', 'CARTILAGE_LATERAL'].includes(key)) return 'Cartilage';
+    return 'SoftTissue';
+  };
+
+  // Auto-jump to relevant slice and optimize windowing preset if an abnormality is selected
   useEffect(() => {
     if (activeAbnormality) {
       const meta = ABNORMALITIES_META[activeAbnormality];
@@ -69,8 +92,20 @@ export const MriViewer: React.FC<MriViewerProps> = ({
       if (targetIdx !== -1) {
         setSliceIndex(targetIdx + 1);
       }
+
+      // Automatically suggest or tune windowing preset for this pathology
+      const recommendedPreset = getRecommendedPreset(activeAbnormality);
+      if (recommendedPreset && WL_PRESETS[recommendedPreset] && customWw === null && customWl === null) {
+        setWlPreset(recommendedPreset);
+      }
     }
   }, [activeAbnormality]);
+
+  const handleSelectPreset = (presetKey: string) => {
+    setWlPreset(presetKey);
+    setCustomWw(null);
+    setCustomWl(null);
+  };
 
   // Cine Playback Loop
   useEffect(() => {
@@ -481,296 +516,185 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col min-h-0 bg-[#0A0E17] text-slate-100 overflow-hidden select-none">
-      {/* Top Controls Toolbar */}
-      <div className="px-3 py-2 border-b border-slate-800/80 bg-[#070A10] flex items-center justify-between gap-2 shrink-0">
-        {/* Plane Selector Tabs */}
-        <div className="flex items-center gap-1 bg-[#0D131F] p-0.5 rounded-lg border border-slate-800">
-          {(['Sagittal', 'Coronal', 'Axial'] as ViewPlane[]).map(plane => (
-            <button
-              key={plane}
-              id={`btn-plane-${plane.toLowerCase()}`}
-              onClick={() => onPlaneChange(plane)}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${
-                currentPlane === plane
-                  ? 'bg-[#00E5FF] text-[#06080B] shadow-sm shadow-[#00E5FF]/20'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              {plane}
-            </button>
-          ))}
-        </div>
-
-        {/* Preset & Invert */}
-        <div className="flex items-center gap-1.5">
-          <select
-            id="select-wl-preset"
-            value={wlPreset}
-            onChange={e => setWlPreset(e.target.value)}
-            className="bg-[#0D131F] border border-slate-700/80 text-slate-200 text-[11px] font-medium rounded-md px-2 py-1 outline-none focus:border-[#00E5FF]"
-          >
-            {Object.keys(WL_PRESETS).map(key => (
-              <option key={key} value={key}>
-                {WL_PRESETS[key].name}
-              </option>
-            ))}
-          </select>
-
+    <div className="h-full w-full relative bg-[#07090E] text-slate-100 overflow-hidden select-none flex items-center justify-center">
+      {/* Top-Left Floating Frosted Glass Plane Selector */}
+      <div className="absolute top-3 left-3 z-30 flex items-center gap-1 bg-[#0B0F19]/85 backdrop-blur-md p-1 rounded-xl border border-[#1E293B] shadow-xl">
+        {(['Sagittal', 'Coronal', 'Axial'] as ViewPlane[]).map(plane => (
           <button
-            id="btn-toggle-invert"
-            onClick={() => setInvert(prev => !prev)}
-            className={`px-2 py-1 text-[11px] font-medium rounded-md border transition-all ${
-              invert
-                ? 'bg-slate-200 text-slate-950 font-bold border-white'
-                : 'bg-[#0D131F] text-slate-400 border-slate-700 hover:text-slate-200'
+            key={plane}
+            id={`btn-plane-${plane.toLowerCase()}`}
+            onClick={() => onPlaneChange(plane)}
+            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
+              currentPlane === plane
+                ? 'bg-[#00E5FF] text-[#07090E] shadow-sm font-bold'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
             }`}
           >
-            Inv
+            {plane}
           </button>
-        </div>
-
-        {/* Tool Toggles */}
-        <div className="flex items-center gap-1">
-          <button
-            id="btn-toggle-heatmap"
-            onClick={() => setShowHeatmap(prev => !prev)}
-            title="Toggle AI Attention / Grad-CAM"
-            className={`p-1.5 rounded-lg border text-[11px] flex items-center gap-1 transition-all ${
-              showHeatmap
-                ? 'bg-[#FF3B5C26] text-[#FF3B5C] border-[#FF3B5C66]'
-                : 'bg-[#0D131F] text-slate-400 border-slate-700 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Heatmap</span>
-          </button>
-
-          <button
-            id="btn-toggle-annotations"
-            onClick={() => setShowAnnotations(prev => !prev)}
-            title="Toggle Pathology Annotations"
-            className={`p-1.5 rounded-lg border text-[11px] flex items-center gap-1 transition-all ${
-              showAnnotations
-                ? 'bg-[#00E5FF22] text-[#00E5FF] border-[#00E5FF55]'
-                : 'bg-[#0D131F] text-slate-400 border-slate-700 hover:text-slate-200'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Targets</span>
-          </button>
-
-          <button
-            id="btn-toggle-caliper"
-            onClick={() => {
-              setActiveTool(prev => (prev === 'measure' ? 'pointer' : 'measure'));
-              setMeasurePoints([]);
-            }}
-            title="Caliper Ruler"
-            className={`p-1.5 rounded-lg border text-[11px] transition-all ${
-              activeTool === 'measure'
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                : 'bg-[#0D131F] text-slate-400 border-slate-700 hover:text-slate-200'
-            }`}
-          >
-            <Ruler className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            id="btn-toggle-crosshairs"
-            onClick={() => setShowCrosshairs(prev => !prev)}
-            title="Toggle Crosshairs"
-            className={`p-1.5 rounded-lg border text-[11px] transition-all ${
-              showCrosshairs
-                ? 'bg-[#00E5FF22] text-[#00E5FF] border-[#00E5FF55]'
-                : 'bg-[#0D131F] text-slate-400 border-slate-700 hover:text-slate-200'
-            }`}
-          >
-            <Crosshair className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        ))}
       </div>
 
-      {/* Main MRI Canvas Viewport (flex-1 min-h-0 relative) */}
-      <div className="flex-1 min-h-0 relative bg-[#04060A] flex items-center justify-center overflow-hidden">
-        {/* Metadata Overlay Header (Top-Left of Viewport) */}
-        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none text-[10px] font-mono text-cyan-300/90 bg-[#06080B]/85 p-2 rounded-lg border border-slate-800/80 backdrop-blur-sm space-y-0.5 leading-tight shadow-md">
-          <div className="font-bold text-white flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span>
-            {currentSliceData.sequenceName} (TR 2800 / TE 35)
-          </div>
-          <div>Plane: <span className="text-white font-semibold">{currentPlane}</span></div>
-          <div>Slice: <span className="text-white font-semibold">{sliceIndex} / {totalSlices}</span> (Thk: {currentSliceData.thicknessMm}mm)</div>
-          <div>WW: {WL_PRESETS[wlPreset]?.windowWidth} / WL: {WL_PRESETS[wlPreset]?.windowLevel}</div>
-        </div>
-
-        {/* Top Right Focus Status */}
+      {/* Top-Right Floating Metadata & Pathology Focus Pill */}
+      <div className="absolute top-3 right-3 z-30 flex flex-col items-end gap-1.5 pointer-events-auto">
         {activeAbnormality && (
-          <div className="absolute top-2.5 right-2.5 z-20 pointer-events-none text-[10px] font-mono bg-[#06080B]/85 px-2.5 py-1 rounded-lg border border-[#FF3B5C55] text-[#FF3B5C] font-bold backdrop-blur-sm shadow-md">
-            Focus: {activeAbnormality}
+          <div className="text-[10.5px] font-mono bg-[#0B0F19]/90 border border-rose-500/50 text-rose-400 font-bold px-2.5 py-1 rounded-lg backdrop-blur-md shadow-lg flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+            <span>Focus: {activeAbnormality}</span>
           </div>
         )}
 
-        {/* The SVG Canvas Container */}
-        <div
-          style={{
-            transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
-            transition: activeTool === 'pan' ? 'none' : 'transform 0.15s ease-out'
-          }}
-          className="w-full h-full max-w-[480px] max-h-[480px] aspect-square flex items-center justify-center p-2"
+        <div className="text-[10px] font-mono text-slate-400 bg-[#0B0F19]/80 px-2.5 py-1 rounded-lg border border-[#1E293B] backdrop-blur-md shadow-md flex items-center gap-2">
+          <span className="text-white font-medium">{currentSliceData.sequenceName}</span>
+          <span className="text-slate-600">•</span>
+          <span>{currentSliceData.thicknessMm}mm</span>
+          <span className="text-slate-600">•</span>
+          <span className="text-[#00E5FF]">{currentPresetData.shortName}</span>
+        </div>
+      </div>
+
+      {/* Zoom / Pan Floating Control Pill (Right-Center) */}
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 bg-[#0B0F19]/80 p-1 rounded-xl border border-[#1E293B] backdrop-blur-md shadow-lg">
+        <button
+          id="btn-zoom-in"
+          onClick={() => setZoom(z => Math.min(2.5, z + 0.25))}
+          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          title="Zoom In"
         >
-          <svg
-            viewBox="0 0 100 100"
-            className="w-full h-full rounded-lg shadow-2xl cursor-crosshair"
-            style={getFilterStyles(wlPreset, invert)}
-            onClick={handleCanvasClick}
-            onMouseMove={handleMouseMove}
-          >
-            {renderMriVisual()}
-          </svg>
-        </div>
+          <ZoomIn className="w-3.5 h-3.5" />
+        </button>
+        <button
+          id="btn-zoom-out"
+          onClick={() => setZoom(z => Math.max(0.75, z - 0.25))}
+          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-3.5 h-3.5" />
+        </button>
+        <button
+          id="btn-zoom-reset"
+          onClick={() => {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          title="Reset Zoom & Pan"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
-        {/* Floating Canvas Tool Buttons (Zoom / Pan / Reset) */}
-        <div className="absolute top-12 right-2.5 z-20 flex flex-col gap-1 bg-[#06080B]/90 p-1 rounded-xl border border-slate-800/80 backdrop-blur-sm shadow-lg">
-          <button
-            id="btn-zoom-in"
-            onClick={() => setZoom(z => Math.min(2.5, z + 0.25))}
-            className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-          <button
-            id="btn-zoom-out"
-            onClick={() => setZoom(z => Math.max(0.75, z - 0.25))}
-            className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <button
-            id="btn-zoom-reset"
-            onClick={() => {
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
-            }}
-            className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
-            title="Reset View"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
+      {/* Main SVG MRI Canvas (Centered, filling available space) */}
+      <div
+        style={{
+          transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
+          transition: activeTool === 'pan' ? 'none' : 'transform 0.15s ease-out'
+        }}
+        className="w-full h-full flex items-center justify-center p-6"
+      >
+        <svg
+          viewBox="0 0 100 100"
+          className="w-full h-full max-w-[560px] max-h-[560px] aspect-square rounded-2xl shadow-2xl cursor-crosshair"
+          style={getFilterStyles(wlPreset, invert, activeWw, activeWl)}
+          onClick={handleCanvasClick}
+          onMouseMove={handleMouseMove}
+        >
+          {renderMriVisual()}
+        </svg>
+      </div>
 
-        {/* Active Slice Finding Banner (Floating bottom overlay) */}
+      {/* Bottom Floating HUD: Scrubber, Play/Pause, Slice Counter, CAM Toggle & Windowing */}
+      <div className="absolute bottom-3 left-3 right-3 z-30 flex flex-col items-center gap-2 pointer-events-auto">
+        {/* Slice Finding Toast if present */}
         {currentSliceData.findings && (
-          <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 bg-[#06080B]/90 border border-[#00E5FF44] px-3 py-1.5 rounded-lg backdrop-blur-md text-[11px] text-slate-200 flex items-center gap-2 shadow-lg truncate">
-            <Info className="w-3.5 h-3.5 text-[#00E5FF] shrink-0" />
+          <div className="bg-[#0B0F19]/90 border border-[#00E5FF33] px-3 py-1 rounded-lg backdrop-blur-md text-[11px] text-slate-300 flex items-center gap-2 shadow-lg max-w-xl truncate">
+            <Info className="w-3 h-3 text-[#00E5FF] shrink-0" />
             <span className="truncate">
-              <span className="font-bold text-[#00E5FF]">Slice {sliceIndex} Finding: </span>
+              <span className="font-bold text-[#00E5FF]">Slice {sliceIndex}: </span>
               {currentSliceData.findings}
             </span>
           </div>
         )}
-      </div>
 
-      {/* Cine Playback & Keyframe Slider (Bottom Bar) */}
-      <div className="p-2.5 bg-[#070A10] border-t border-slate-800/80 space-y-1.5 shrink-0">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          {/* Scrub controls: [|<] [> Play / Pause] [>|] */}
-          <div className="flex items-center gap-1.5">
+        {/* Floating Minimal Glass HUD Bar */}
+        <div className="w-full max-w-2xl bg-[#0B0F19]/90 border border-[#1E293B] rounded-xl px-3 py-2 backdrop-blur-xl shadow-2xl flex items-center gap-3">
+          {/* Play/Pause Minimal Icon */}
+          <button
+            id="btn-hud-play-pause"
+            onClick={() => setIsPlaying(p => !p)}
+            className="p-1.5 rounded-lg bg-[#111827] hover:bg-slate-800 text-[#00E5FF] transition-all shrink-0 border border-slate-800"
+            title={isPlaying ? "Pause Cine Playback (Space)" : "Play Cine Loop (Space)"}
+          >
+            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* Prev / Next Step Buttons */}
+          <div className="flex items-center gap-0.5 shrink-0">
             <button
-              id="btn-slice-first"
-              onClick={() => setSliceIndex(1)}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded"
-              title="First Slice"
-            >
-              <span className="font-mono text-[10px] font-bold">|&lt;</span>
-            </button>
-            <button
-              id="btn-slice-prev"
+              id="btn-hud-slice-prev"
               onClick={() => setSliceIndex(prev => Math.max(1, prev - 1))}
-              className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded"
+              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800/60"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <button
-              id="btn-slice-play"
-              onClick={() => setIsPlaying(p => !p)}
-              className="px-2 py-0.5 rounded bg-[#0D131F] hover:bg-slate-800 text-slate-200 flex items-center gap-1 border border-slate-700/80 font-mono text-[10px] font-bold"
-            >
-              {isPlaying ? <Pause className="w-3 h-3 text-[#00E5FF]" /> : <Play className="w-3 h-3 text-[#00E5FF]" />}
-              <span>{isPlaying ? 'Pause' : 'Play'}</span>
-            </button>
-            <button
-              id="btn-slice-next"
+              id="btn-hud-slice-next"
               onClick={() => setSliceIndex(prev => Math.min(totalSlices, prev + 1))}
-              className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded"
+              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800/60"
             >
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
-            <button
-              id="btn-slice-last"
-              onClick={() => setSliceIndex(totalSlices)}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded"
-              title="Last Slice"
-            >
-              <span className="font-mono text-[10px] font-bold">&gt;|</span>
-            </button>
           </div>
 
-          <div className="font-mono text-[#00E5FF] font-bold text-[11px]">
-            Slice {sliceIndex} / {totalSlices}
+          {/* Elegant Thin Scrubber Line */}
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <input
+              type="range"
+              id="mri-slice-slider-hud"
+              min="1"
+              max={totalSlices}
+              value={sliceIndex}
+              onChange={e => setSliceIndex(Number(e.target.value))}
+              className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#00E5FF]"
+            />
           </div>
 
-          {isPlaying && (
-            <div className="flex items-center gap-1 text-[10px]">
-              <span>FPS:</span>
-              {[4, 6, 10].map(fps => (
-                <button
-                  key={fps}
-                  onClick={() => setCineFps(fps)}
-                  className={`px-1.5 py-0.2 rounded font-mono ${
-                    cineFps === fps ? 'bg-[#00E5FF] text-[#06080B] font-bold' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {fps}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+          {/* Slice Label "12 / 20" */}
+          <div className="font-mono text-xs font-bold text-[#00E5FF] shrink-0 min-w-[50px] text-right">
+            {sliceIndex} / {totalSlices}
+          </div>
 
-        {/* Precision Slider with custom cyan accent */}
-        <input
-          type="range"
-          id="mri-slice-slider"
-          min="1"
-          max={totalSlices}
-          value={sliceIndex}
-          onChange={e => setSliceIndex(Number(e.target.value))}
-          className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#00E5FF]"
-        />
+          <div className="h-4 w-px bg-slate-800 shrink-0" />
 
-        {/* Key Pathology Slice Markers */}
-        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pt-0.5 text-[10px]">
-          <span className="text-slate-500 shrink-0 font-medium text-[9px] uppercase tracking-wider">Key:</span>
-          {activeSliceList.map(s => {
-            if (!s.pathologyHighlights || s.pathologyHighlights.length === 0) return null;
-            const isCurrent = s.sliceIndex === sliceIndex;
-            return (
-              <button
-                key={s.sliceIndex}
-                onClick={() => setSliceIndex(s.sliceIndex)}
-                className={`px-1.5 py-0.5 rounded font-mono text-[10px] shrink-0 transition-all ${
-                  isCurrent
-                    ? 'bg-[#00E5FF] text-[#06080B] font-bold shadow-sm'
-                    : 'bg-[#0D131F] hover:bg-slate-800 text-[#00E5FF] border border-slate-800'
-                }`}
-              >
-                #{s.sliceIndex} {s.pathologyHighlights.map(h => h.abnormality).join(', ')}
-              </button>
-            );
-          })}
+          {/* Window Preset Selector Quick Pill */}
+          <select
+            id="select-hud-window"
+            value={wlPreset}
+            onChange={e => handleSelectPreset(e.target.value)}
+            className="bg-[#111827] border border-[#1E293B] text-slate-300 text-[11px] font-medium rounded-lg px-2 py-1 outline-none cursor-pointer hover:border-slate-700 shrink-0"
+            title="Windowing Preset"
+          >
+            <option value="SoftTissue">Soft Tissue</option>
+            <option value="Bone">Bone</option>
+            <option value="MAR">MAR</option>
+            <option value="STIR">STIR</option>
+            <option value="Cartilage">Cartilage</option>
+          </select>
+
+          {/* Subtle CAM / Grad-CAM Attention Toggle */}
+          <button
+            id="btn-hud-toggle-cam"
+            onClick={() => setShowHeatmap(prev => !prev)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all shrink-0 ${
+              showHeatmap
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 shadow-sm'
+                : 'bg-[#111827] text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+            title="Toggle Attention Heatmap (Grad-CAM)"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="hidden sm:inline text-[11px]">CAM</span>
+          </button>
         </div>
       </div>
     </div>

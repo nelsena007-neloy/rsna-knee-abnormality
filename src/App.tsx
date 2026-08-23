@@ -2,25 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { StudyInstance, ViewPlane, AbnormalityKey, EnsembleConfig, PredictionResult } from './types';
 import { MOCK_STUDIES } from './data/mockStudies';
 import { calculateEvaluationMetrics } from './utils/metrics';
-import { Navbar } from './components/Navbar';
-import { CaseSelector } from './components/CaseSelector';
+import { Navbar, ActiveTab } from './components/Navbar';
 import { MriViewer } from './components/MriViewer';
-import { ReportViewer } from './components/ReportViewer';
-import { PredictionMatrix } from './components/PredictionMatrix';
+import { DiagnosticIntelligencePane } from './components/DiagnosticIntelligencePane';
 import { ModelArchitecture } from './components/ModelArchitecture';
 import { EvaluationDashboard } from './components/EvaluationDashboard';
 import { SubmissionLab } from './components/SubmissionLab';
 import { CopilotDrawer } from './components/CopilotDrawer';
 import { RecommendationsCenter } from './components/RecommendationsCenter';
+import { ExportReportModal } from './components/ExportReportModal';
+import { BarChart3, FileSpreadsheet } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'viewer' | 'architecture' | 'evaluation' | 'submission'>('viewer');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('viewer');
+  const [leaderboardSubTab, setLeaderboardSubTab] = useState<'evaluation' | 'submission'>('evaluation');
   const [studies, setStudies] = useState<StudyInstance[]>(MOCK_STUDIES);
   const [selectedStudyId, setSelectedStudyId] = useState<string>(MOCK_STUDIES[0].patientId);
   const [currentPlane, setCurrentPlane] = useState<ViewPlane>('Sagittal');
   const [activeAbnormality, setActiveAbnormality] = useState<AbnormalityKey | null>('ACL');
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isRecommendationsOpen, setIsRecommendationsOpen] = useState<boolean>(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isPredicting, setIsPredicting] = useState<boolean>(false);
 
   // Predictions cache map: study.patientId -> predictions record
@@ -117,7 +119,6 @@ export function App() {
 
   const handleSelectAbnormality = (key: AbnormalityKey) => {
     setActiveAbnormality(key);
-    // Switch to viewer tab if on another tab
     if (activeTab !== 'viewer') {
       setActiveTab('viewer');
     }
@@ -127,103 +128,121 @@ export function App() {
     const fullStudy = newStudy as StudyInstance;
     setStudies(prev => [fullStudy, ...prev]);
     setSelectedStudyId(fullStudy.patientId);
-
-    // Run prediction on the uploaded study
     runMultimodalPrediction(fullStudy);
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#06080B] text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-[#06080B]">
-      {/* Fixed Header Bar (h-14) */}
+    <div className="h-screen w-screen overflow-hidden bg-[#07090E] text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-[#07090E]">
+      {/* 1. Consolidated 48px Header Bar */}
       <Navbar
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        studies={studies}
+        selectedStudyId={selectedStudyId}
+        onSelectStudy={study => {
+          setSelectedStudyId(study.patientId);
+          setActiveAbnormality(null);
+        }}
+        onCustomUpload={handleCustomUpload}
         macroAuc={macroAuc}
-        onOpenCopilot={() => setIsCopilotOpen(true)}
-        onOpenRecommendations={() => setIsRecommendationsOpen(true)}
         onRunAiPrediction={() => runMultimodalPrediction(currentStudy)}
         isPredicting={isPredicting}
+        onOpenCopilot={() => setIsCopilotOpen(true)}
+        onExportReport={() => setIsExportModalOpen(true)}
       />
 
-      {/* Main Workspace (100vh locked viewport) */}
+      {/* 2. Main Workspace (Locked 100vh Viewport) */}
       {activeTab === 'viewer' ? (
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-2.5 gap-2">
-          {/* Top Case Selector Strip */}
-          <CaseSelector
-            studies={studies}
-            selectedStudyId={selectedStudyId}
-            onSelectStudy={study => {
-              setSelectedStudyId(study.patientId);
-              setActiveAbnormality(null);
-            }}
-            onCustomUpload={handleCustomUpload}
+        /* Asymmetric 2-Pane Layout (65% Canvas / 35% Intelligence) */
+        <main className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left Column (65%): Hero Diagnostic Viewport */}
+          <div className="w-[65%] h-full min-h-0 relative">
+            <MriViewer
+              currentPlane={currentPlane}
+              onPlaneChange={setCurrentPlane}
+              slices={currentStudy.slices}
+              activeAbnormality={activeAbnormality}
+              onSelectAbnormality={handleSelectAbnormality}
+            />
+          </div>
+
+          {/* Right Column (35%): Diagnostic Intelligence Panel */}
+          <div className="w-[35%] h-full min-h-0">
+            <DiagnosticIntelligencePane
+              currentStudy={currentStudy}
+              predictions={currentPredictions}
+              activeAbnormality={activeAbnormality}
+              onSelectAbnormality={handleSelectAbnormality}
+              aiExplanation={aiExplanations[currentStudy.patientId]}
+              onOpenRecommendations={() => setIsRecommendationsOpen(true)}
+              onExportReport={() => setIsExportModalOpen(true)}
+              onCustomReportAnalyze={customText => runMultimodalPrediction(currentStudy, customText)}
+              isAnalyzing={isPredicting}
+            />
+          </div>
+        </main>
+      ) : activeTab === 'architecture' ? (
+        /* Architecture View */
+        <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-6 max-w-7xl w-full mx-auto">
+          <ModelArchitecture
+            config={ensembleConfig}
+            onChangeConfig={setEnsembleConfig}
+            currentMacroAuc={macroAuc}
           />
+        </main>
+      ) : (
+        /* Leaderboard & Evaluation View */
+        <main className="flex-1 min-h-0 flex flex-col overflow-hidden max-w-7xl w-full mx-auto p-4 gap-3">
+          {/* Sub-tab segmented switcher */}
+          <div className="flex items-center justify-between border-b border-[#1E293B] pb-3 shrink-0">
+            <div className="flex items-center gap-1.5 bg-[#0B0F19] p-1 rounded-xl border border-[#1E293B]">
+              <button
+                id="btn-subtab-eval"
+                onClick={() => setLeaderboardSubTab('evaluation')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  leaderboardSubTab === 'evaluation'
+                    ? 'bg-[#00E5FF] text-[#07090E] shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>ROC-AUC Matrix & Curves</span>
+              </button>
 
-          {/* Main 12-Column Grid */}
-          <div className="flex-1 grid grid-cols-12 gap-2.5 min-h-0 overflow-hidden">
-            {/* Left Column: DICOM Viewport (col-span-5) */}
-            <div className="col-span-5 flex flex-col min-h-0 bg-[#0A0E17] border border-slate-800/80 rounded-xl overflow-hidden">
-              <MriViewer
-                currentPlane={currentPlane}
-                onPlaneChange={setCurrentPlane}
-                slices={currentStudy.slices}
-                activeAbnormality={activeAbnormality}
-                onSelectAbnormality={handleSelectAbnormality}
-              />
+              <button
+                id="btn-subtab-submission"
+                onClick={() => setLeaderboardSubTab('submission')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  leaderboardSubTab === 'submission'
+                    ? 'bg-[#00E5FF] text-[#07090E] shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>RSNA Submission Lab & Benchmark</span>
+              </button>
             </div>
 
-            {/* Center Column: Clinical Indication & Reports (col-span-4) */}
-            <div className="col-span-4 flex flex-col min-h-0 bg-[#0A0E17] border border-slate-800/80 rounded-xl overflow-hidden">
-              <ReportViewer
-                study={currentStudy}
-                activeAbnormality={activeAbnormality}
-                onSelectAbnormality={handleSelectAbnormality}
-                onCustomReportAnalyze={customText => runMultimodalPrediction(currentStudy, customText)}
-                isAnalyzing={isPredicting}
-              />
-            </div>
-
-            {/* Right Column: 12-Target Pathology Matrix (col-span-3) */}
-            <div className="col-span-3 flex flex-col min-h-0 bg-[#0A0E17] border border-slate-800/80 rounded-xl overflow-hidden">
-              <PredictionMatrix
-                currentStudy={currentStudy}
-                predictions={currentPredictions}
-                activeAbnormality={activeAbnormality}
-                onSelectAbnormality={handleSelectAbnormality}
-                aiExplanation={aiExplanations[currentStudy.patientId]}
-                onOpenRecommendations={() => setIsRecommendationsOpen(true)}
-              />
+            <div className="font-mono text-xs text-slate-400 bg-[#0B0F19] px-3 py-1.5 rounded-lg border border-[#1E293B]">
+              Current Macro-AUC: <span className="text-[#00E5FF] font-bold">{macroAuc.toFixed(4)}</span>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 max-w-7xl w-full mx-auto">
-          {/* Tab 2: Multimodal 3D Vision + NLP Architecture & Sandbox */}
-          {activeTab === 'architecture' && (
-            <ModelArchitecture
-              config={ensembleConfig}
-              onChangeConfig={setEnsembleConfig}
-              currentMacroAuc={macroAuc}
-            />
-          )}
 
-          {/* Tab 3: ROC-AUC Evaluation & Confusion Matrix Dashboard */}
-          {activeTab === 'evaluation' && (
-            <EvaluationDashboard
-              evaluations={perAbnormality}
-              macroAuc={macroAuc}
-            />
-          )}
-
-          {/* Tab 4: RSNA Submission Lab & Live Leaderboard */}
-          {activeTab === 'submission' && (
-            <SubmissionLab
-              studies={studies}
-              predictionMap={predictionMap}
-              macroAuc={macroAuc}
-            />
-          )}
-        </div>
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            {leaderboardSubTab === 'evaluation' ? (
+              <EvaluationDashboard
+                evaluations={perAbnormality}
+                macroAuc={macroAuc}
+              />
+            ) : (
+              <SubmissionLab
+                studies={studies}
+                predictionMap={predictionMap}
+                macroAuc={macroAuc}
+              />
+            )}
+          </div>
+        </main>
       )}
 
       {/* AI Radiologist Copilot Side Drawer */}
@@ -235,7 +254,7 @@ export function App() {
         aiExplanation={aiExplanations[currentStudy.patientId]}
       />
 
-      {/* All Clinical & ML Recommendations Center Modal */}
+      {/* Clinical Recommendations Center Modal */}
       <RecommendationsCenter
         isOpen={isRecommendationsOpen}
         onClose={() => setIsRecommendationsOpen(false)}
@@ -243,6 +262,16 @@ export function App() {
         predictions={currentPredictions}
         aiExplanation={aiExplanations[currentStudy.patientId]}
         onSelectAbnormality={handleSelectAbnormality}
+      />
+
+      {/* Structured Clinical Diagnostic & AI Export Modal */}
+      <ExportReportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        study={currentStudy}
+        predictions={currentPredictions}
+        aiExplanation={aiExplanations[currentStudy.patientId]}
+        ensembleConfig={ensembleConfig}
       />
     </div>
   );
