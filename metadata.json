@@ -1,0 +1,6 @@
+{
+  "name": "RSNA Knee Abnormality Detection Studio",
+  "description": "Multimodal AI decision support system and competitive modeling workbench for detecting 12 clinically important knee MRI abnormalities with AUC-ROC evaluation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Custom thin scrollbar styling to prevent layout shift and clipping */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #1e293b transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+}
