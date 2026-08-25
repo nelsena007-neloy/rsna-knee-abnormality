@@ -61,6 +61,39 @@ export interface RadiologyReportSection {
   }[];
 }
 
+export type IngestionStream = 'PACS_DICOM' | 'FILM_SHEET_OCR';
+export type SourceFidelity = '16-bit Native Volumetric' | '8-bit Digitized Tiles';
+
+export interface FilmGridTile {
+  tileId: string;
+  gridRow: number;
+  gridCol: number;
+  plane: ViewPlane;
+  estimatedSliceIndex: number;
+  confidence: number;
+  boundingBox: { x: number; y: number; width: number; height: number }; // percentages
+  included: boolean;
+  intensityNormalized?: boolean;
+}
+
+export interface IngestionMetadata {
+  stream: IngestionStream;
+  sourceFidelity: SourceFidelity;
+  ingestionTimestamp: string;
+  pacsServerAETitle?: string;
+  port?: number;
+  transferSyntaxUID?: string;
+  photometricInterpretation?: string;
+  pixelSpacing?: [number, number];
+  sliceThicknessMm?: number;
+  repetitionTimeMs?: number;
+  echoTimeMs?: number;
+  directionCosines?: number[];
+  ocrConfidence?: number;
+  gridShape?: [number, number]; // e.g. [3, 4] for 12 tiles
+  tiledSlicesCount?: number;
+}
+
 export interface StudyInstance {
   studyInstanceUID: string;
   patientId: string;
@@ -70,6 +103,9 @@ export interface StudyInstance {
   clinicalIndication: string;
   studyDate: string;
   magnetStrength: '1.5T' | '3.0T';
+  sourceFidelity?: SourceFidelity;
+  ingestionStream?: IngestionStream;
+  ingestionMetadata?: IngestionMetadata;
   report: {
     clinicalHistory: string;
     technique: string;
@@ -115,6 +151,13 @@ export interface PredictionResult {
   confidence: number;
   processingTimeMs: number;
   modelVariant: string;
+  structuredCopilotOutput?: StructuredMskCopilotResponse;
+  modelParams?: {
+    model: string;
+    temperature: number;
+    topP: number;
+    responseFormat: string;
+  };
 }
 
 export interface RocCurvePoint {
@@ -161,4 +204,31 @@ export interface EnsembleConfig {
   fusionMethod: 'Cross-Attention Gating' | 'Late Fusion Concat' | 'Tensor Bilinear Pooling';
   temperatureScaling: number;
   useTTA: boolean; // Test-Time Augmentation
+}
+
+export type MacroRiskLevel = 'Critical / High Risk' | 'Moderate / Borderline' | 'Unremarkable / Negative';
+
+export interface AnatomicalFindingItem {
+  target: string;
+  status: string;
+  confidence_score: number;
+  optimal_plane: ViewPlane;
+  key_slice_index: number;
+  radiological_evidence: string;
+}
+
+export interface StructuredMskCopilotResponse {
+  study_id: string;
+  primary_diagnosis: string;
+  macro_risk_level: MacroRiskLevel;
+  anatomical_findings: AnatomicalFindingItem[];
+  copilot_rationale: string;
+  clinical_management_protocol: string;
+}
+
+export interface ModelSettingsConfig {
+  selectedModel: 'gemini-2.5-pro' | 'gemini-2.5-flash' | 'gemini-1.5-pro' | 'gemini-1.5-flash';
+  temperature: number;
+  topP: number;
+  responseFormat: 'JSON';
 }

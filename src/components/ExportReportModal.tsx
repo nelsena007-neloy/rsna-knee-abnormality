@@ -123,9 +123,9 @@ export const ExportReportModal: React.FC<ExportReportModalProps> = ({
                 <span className="text-[11px] text-slate-300">{study.patientAge}yo {study.patientGender} • {study.kneeSide} Knee</span>
               </div>
               <div className="bg-[#0D131F] p-3 rounded-xl border border-slate-800">
-                <span className="text-[10px] uppercase text-slate-400 block font-semibold">Imaging Magnet & Date</span>
-                <span className="text-sm font-bold text-[#00E5FF] block mt-0.5">{study.magnetStrength} MRI</span>
-                <span className="text-[11px] text-slate-300">{study.studyDate}</span>
+                <span className="text-[10px] uppercase text-slate-400 block font-semibold">Ingestion Stream & Fidelity</span>
+                <span className="text-sm font-bold text-[#00E5FF] block mt-0.5 truncate">{study.magnetStrength} {study.sourceFidelity?.includes('16-bit') ? '16-bit PACS' : '8-bit Film'}</span>
+                <span className="text-[11px] text-slate-300">{study.sourceFidelity || '16-bit Native Volumetric'}</span>
               </div>
               <div className="bg-[#0D131F] p-3 rounded-xl border border-slate-800">
                 <span className="text-[10px] uppercase text-slate-400 block font-semibold">RSNA Targets Evaluated</span>

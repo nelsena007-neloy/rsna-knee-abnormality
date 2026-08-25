@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ViewPlane, MriSlice, AbnormalityKey } from '../types';
-import { ABNORMALITIES_META } from '../data/abnormalities';
+import { ABNORMALITIES_META, ABNORMALITY_KEY_SLICES } from '../data/abnormalities';
 import { WL_PRESETS, getFilterStyles, WindowLevelPreset } from '../utils/mriRenderer';
 import {
   ZoomIn,
@@ -24,7 +24,14 @@ import {
   X,
   Check,
   Zap,
-  Activity
+  Activity,
+  HelpCircle,
+  Keyboard,
+  ArrowRight,
+  ArrowLeft,
+  Maximize2,
+  Minimize2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface MriViewerProps {
@@ -36,7 +43,15 @@ interface MriViewerProps {
     axial: MriSlice[];
   };
   activeAbnormality?: AbnormalityKey | null;
-  onSelectAbnormality?: (key: AbnormalityKey) => void;
+  onSelectAbnormality?: (key: AbnormalityKey, plane?: ViewPlane, sliceIndex?: number) => void;
+  sourceFidelity?: string;
+  ingestionStream?: string;
+  onOpenIngestionModal?: () => void;
+  targetSliceIndex?: number;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+  abnormalCount?: number;
+  macroAuc?: number;
 }
 
 export const MriViewer: React.FC<MriViewerProps> = ({
@@ -44,7 +59,15 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   onPlaneChange,
   slices,
   activeAbnormality,
-  onSelectAbnormality
+  onSelectAbnormality,
+  sourceFidelity,
+  ingestionStream,
+  onOpenIngestionModal,
+  targetSliceIndex,
+  isSidebarOpen = true,
+  onToggleSidebar,
+  abnormalCount = 0,
+  macroAuc = 1.000
 }) => {
   const [sliceIndex, setSliceIndex] = useState<number>(12);
   const [wlPreset, setWlPreset] = useState<string>('SoftTissue');
@@ -62,6 +85,28 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   const [cineFps, setCineFps] = useState<number>(6);
   const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number }[]>([]);
   const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+        setIsFullscreen(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   const activeSliceList = currentPlane === 'Sagittal' ? slices.sagittal : currentPlane === 'Coronal' ? slices.coronal : slices.axial;
   const totalSlices = activeSliceList.length || 20;
@@ -71,12 +116,20 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   const activeWw = customWw ?? currentPresetData.windowWidth;
   const activeWl = customWl ?? currentPresetData.windowLevel;
 
+  // React to targetSliceIndex prop if provided
+  useEffect(() => {
+    if (targetSliceIndex && targetSliceIndex >= 1 && targetSliceIndex <= totalSlices) {
+      setSliceIndex(targetSliceIndex);
+      setShowHeatmap(true);
+    }
+  }, [targetSliceIndex, totalSlices]);
+
   // Helper to recommend preset based on selected knee pathology
   const getRecommendedPreset = (key: AbnormalityKey): string => {
     if (['ACL', 'PCL', 'MM', 'LM', 'MCL', 'LCL'].includes(key)) return 'SoftTissue';
-    if (['BONE_CONTUSION', 'FRACTURE', 'PATELLAR_TRACKING'].includes(key)) return 'Bone';
-    if (['EFFUSION', 'BAKER_CYST'].includes(key)) return 'STIR';
-    if (['CARTILAGE', 'CARTILAGE_MEDIAL', 'CARTILAGE_LATERAL'].includes(key)) return 'Cartilage';
+    if (['BONE_CONTUSION', 'FRACTURE', 'PATELLAR_TRACKING', 'Fracture', 'Contusion'].includes(key)) return 'Bone';
+    if (['EFFUSION', 'BAKER_CYST', 'Effusion', "Baker's"].includes(key)) return 'STIR';
+    if (['CARTILAGE', 'CARTILAGE_MEDIAL', 'CARTILAGE_LATERAL', 'Medial OA', 'Lateral OA', 'PF OA'].includes(key)) return 'Cartilage';
     return 'SoftTissue';
   };
 
@@ -84,14 +137,24 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   useEffect(() => {
     if (activeAbnormality) {
       const meta = ABNORMALITIES_META[activeAbnormality];
+      const sliceInfo = ABNORMALITY_KEY_SLICES[activeAbnormality];
+
       if (meta && meta.primaryPlane !== currentPlane) {
         onPlaneChange(meta.primaryPlane);
       }
-      const targetList = meta?.primaryPlane === 'Coronal' ? slices.coronal : meta?.primaryPlane === 'Axial' ? slices.axial : slices.sagittal;
-      const targetIdx = targetList.findIndex(s => s.pathologyHighlights?.some(h => h.abnormality === activeAbnormality));
-      if (targetIdx !== -1) {
-        setSliceIndex(targetIdx + 1);
+      
+      if (sliceInfo) {
+        setSliceIndex(sliceInfo.slice);
+      } else {
+        const targetList = meta?.primaryPlane === 'Coronal' ? slices.coronal : meta?.primaryPlane === 'Axial' ? slices.axial : slices.sagittal;
+        const targetIdx = targetList.findIndex(s => s.pathologyHighlights?.some(h => h.abnormality === activeAbnormality));
+        if (targetIdx !== -1) {
+          setSliceIndex(targetIdx + 1);
+        }
       }
+
+      // Always ensure Grad-CAM heatmap is enabled on jump
+      setShowHeatmap(true);
 
       // Automatically suggest or tune windowing preset for this pathology
       const recommendedPreset = getRecommendedPreset(activeAbnormality);
@@ -107,6 +170,13 @@ export const MriViewer: React.FC<MriViewerProps> = ({
     setCustomWl(null);
   };
 
+  const cyclePreset = () => {
+    const presetKeys = Object.keys(WL_PRESETS);
+    const currentIndex = presetKeys.indexOf(wlPreset);
+    const nextIndex = (currentIndex + 1) % presetKeys.length;
+    handleSelectPreset(presetKeys[nextIndex]);
+  };
+
   // Cine Playback Loop
   useEffect(() => {
     if (!isPlaying) return;
@@ -116,19 +186,44 @@ export const MriViewer: React.FC<MriViewerProps> = ({
     return () => clearInterval(interval);
   }, [isPlaying, totalSlices, cineFps]);
 
-  // Keyboard navigation
+  // Keyboard navigation & shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
       if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+        e.preventDefault();
         setSliceIndex(prev => Math.min(totalSlices, prev + 1));
       } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+        e.preventDefault();
         setSliceIndex(prev => Math.max(1, prev - 1));
       } else if (e.key === ' ') {
         e.preventDefault();
         setIsPlaying(prev => !prev);
+      } else if (e.key === '1') {
+        onPlaneChange('Sagittal');
+      } else if (e.key === '2') {
+        onPlaneChange('Coronal');
+      } else if (e.key === '3') {
+        onPlaneChange('Axial');
+      } else if (e.key === 'c' || e.key === 'C') {
+        setShowHeatmap(prev => !prev);
+      } else if (e.key === 'w' || e.key === 'W') {
+        cyclePreset();
+      } else if (e.key === 't' || e.key === 'T') {
+        onToggleSidebar?.();
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      } else if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        setIsHelpModalOpen(prev => !prev);
+      } else if (e.key === 'Escape') {
+        setIsHelpModalOpen(false);
       }
     },
-    [totalSlices]
+    [totalSlices, onPlaneChange, wlPreset, onToggleSidebar]
   );
 
   useEffect(() => {
@@ -406,7 +501,6 @@ export const MriViewer: React.FC<MriViewerProps> = ({
         {showAnnotations && currentSliceData.pathologyHighlights && (
           <g id="pathology-annotations">
             {currentSliceData.pathologyHighlights.map((hl, i) => {
-              const meta = ABNORMALITIES_META[hl.abnormality];
               const isSelected = activeAbnormality === hl.abnormality;
               return (
                 <g key={i} className="cursor-pointer" onClick={() => onSelectAbnormality?.(hl.abnormality)}>
@@ -517,59 +611,136 @@ export const MriViewer: React.FC<MriViewerProps> = ({
 
   return (
     <div className="h-full w-full relative bg-[#07090E] text-slate-100 overflow-hidden select-none flex items-center justify-center">
-      {/* Top-Left Floating Frosted Glass Plane Selector */}
-      <div className="absolute top-3 left-3 z-30 flex items-center gap-1 bg-[#0B0F19]/85 backdrop-blur-md p-1 rounded-xl border border-[#1E293B] shadow-xl">
-        {(['Sagittal', 'Coronal', 'Axial'] as ViewPlane[]).map(plane => (
+      {/* Top-Left Floating Frosted Glass Plane Selector & Stream Fidelity Pill */}
+      <div className="absolute top-3.5 left-3.5 z-30 flex items-center gap-2.5">
+        <div className="flex items-center gap-1 bg-[#0B0F19]/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 shadow-xl">
+          {(['Sagittal', 'Coronal', 'Axial'] as ViewPlane[]).map((plane, idx) => (
+            <button
+              key={plane}
+              id={`btn-plane-${plane.toLowerCase()}`}
+              onClick={() => onPlaneChange(plane)}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                currentPlane === plane
+                  ? 'bg-[#00E5FF] text-[#07090E] shadow-sm font-bold'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <span>{plane}</span>
+              <span className={`text-[10px] font-mono px-1 rounded ${currentPlane === plane ? 'bg-[#07090E]/20 text-[#07090E]' : 'text-slate-500'}`}>
+                {idx + 1}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Workstation HUD Ingestion Fidelity Badge */}
+        {onOpenIngestionModal ? (
           <button
-            key={plane}
-            id={`btn-plane-${plane.toLowerCase()}`}
-            onClick={() => onPlaneChange(plane)}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-              currentPlane === plane
-                ? 'bg-[#00E5FF] text-[#07090E] shadow-sm font-bold'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            id="btn-hud-stream-fidelity"
+            onClick={onOpenIngestionModal}
+            className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono font-bold backdrop-blur-md border shadow-lg transition-all hover:scale-105 ${
+              sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 hover:border-emerald-400'
+                : 'bg-amber-950/80 text-amber-300 border-amber-500/40 hover:border-amber-400'
+            }`}
+            title="Click to Switch Ingestion Pipeline or Upload DICOM / Film"
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'bg-emerald-400 animate-pulse'
+                : 'bg-amber-400 animate-pulse'
+            }`} />
+            <span>
+              {sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'SOURCE: PACS C-STORE (16-BIT)'
+                : 'SOURCE: FILM SHEET (8-BIT TILES)'}
+            </span>
+          </button>
+        ) : (
+          <div
+            className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono font-bold backdrop-blur-md border shadow-lg ${
+              sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
             }`}
           >
-            {plane}
-          </button>
-        ))}
+            <span className={`w-2 h-2 rounded-full ${
+              sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'bg-emerald-400'
+                : 'bg-amber-400'
+            }`} />
+            <span>
+              {sourceFidelity?.includes('16-bit') || ingestionStream === 'PACS_DICOM' || (!sourceFidelity && !ingestionStream)
+                ? 'SOURCE: PACS C-STORE (16-BIT)'
+                : 'SOURCE: FILM SHEET (8-BIT TILES)'}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Top-Right Floating Metadata & Pathology Focus Pill */}
-      <div className="absolute top-3 right-3 z-30 flex flex-col items-end gap-1.5 pointer-events-auto">
+      {/* Top-Right Floating Metadata, Pathology Focus Pill & Keyboard Help Button */}
+      <div className="absolute top-3.5 right-3.5 z-30 flex items-center gap-2 pointer-events-auto">
+        {/* Collapsed Theater Triage Pill (Visible ONLY when Sidebar is closed) */}
+        {!isSidebarOpen && onToggleSidebar && (
+          <button
+            id="btn-theater-triage-capsule"
+            onClick={onToggleSidebar}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0B0F19]/95 border border-rose-500/50 text-rose-400 text-xs font-semibold shadow-2xl hover:bg-slate-900 hover:border-[#00E5FF]/60 transition-all cursor-pointer group animate-fade-in backdrop-blur-md"
+            title="Click to re-expand Diagnostic Analysis Matrix"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+            <span className="font-bold text-white group-hover:text-[#00E5FF] transition-colors">
+              {abnormalCount > 0 ? `${abnormalCount} Abnormalities Detected` : '0 Abnormalities Detected'}
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-[#00E5FF] font-mono font-bold">Macro-AUC: {macroAuc.toFixed(4)}</span>
+            <ChevronLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-white group-hover:-translate-x-0.5 transition-transform" />
+          </button>
+        )}
+
         {activeAbnormality && (
-          <div className="text-[10.5px] font-mono bg-[#0B0F19]/90 border border-rose-500/50 text-rose-400 font-bold px-2.5 py-1 rounded-lg backdrop-blur-md shadow-lg flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+          <div className="text-xs font-mono bg-[#0B0F19]/90 border border-rose-500/50 text-rose-400 font-bold px-3 py-1.5 rounded-xl backdrop-blur-md shadow-lg flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
             <span>Focus: {activeAbnormality}</span>
           </div>
         )}
 
-        <div className="text-[10px] font-mono text-slate-400 bg-[#0B0F19]/80 px-2.5 py-1 rounded-lg border border-[#1E293B] backdrop-blur-md shadow-md flex items-center gap-2">
-          <span className="text-white font-medium">{currentSliceData.sequenceName}</span>
+        <div className="text-xs font-mono text-slate-300 bg-[#0B0F19]/85 px-3 py-1.5 rounded-xl border border-slate-800 backdrop-blur-md shadow-md flex items-center gap-2.5">
+          <span className="text-white font-semibold">{currentSliceData.sequenceName}</span>
           <span className="text-slate-600">•</span>
           <span>{currentSliceData.thicknessMm}mm</span>
           <span className="text-slate-600">•</span>
-          <span className="text-[#00E5FF]">{currentPresetData.shortName}</span>
+          <span className="text-[#00E5FF] font-bold">{currentPresetData.shortName}</span>
         </div>
+
+        {/* Floating ? Help Button */}
+        <button
+          id="btn-viewer-keyboard-help"
+          onClick={() => setIsHelpModalOpen(true)}
+          className="p-1.5 rounded-xl bg-[#0B0F19]/90 hover:bg-[#111827] text-slate-400 hover:text-[#00E5FF] border border-slate-800 hover:border-slate-700 shadow-xl transition-all"
+          title="Keyboard Shortcuts & Workstation Navigation (?)"
+        >
+          <HelpCircle className="w-4 h-4" />
+        </button>
       </div>
 
-      {/* Zoom / Pan Floating Control Pill (Right-Center) */}
-      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 bg-[#0B0F19]/80 p-1 rounded-xl border border-[#1E293B] backdrop-blur-md shadow-lg">
+      {/* Zoom / Pan Floating Control Pill (Right-Top offset to prevent collision with center toggle tab) */}
+      <div className="absolute right-3.5 top-20 z-30 flex flex-col gap-1.5 bg-[#0B0F19]/90 p-1.5 rounded-xl border border-slate-800 backdrop-blur-md shadow-xl">
         <button
           id="btn-zoom-in"
           onClick={() => setZoom(z => Math.min(2.5, z + 0.25))}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          className="p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors"
           title="Zoom In"
         >
-          <ZoomIn className="w-3.5 h-3.5" />
+          <ZoomIn className="w-4 h-4" />
         </button>
         <button
           id="btn-zoom-out"
           onClick={() => setZoom(z => Math.max(0.75, z - 0.25))}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          className="p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors"
           title="Zoom Out"
         >
-          <ZoomOut className="w-3.5 h-3.5" />
+          <ZoomOut className="w-4 h-4" />
         </button>
         <button
           id="btn-zoom-reset"
@@ -577,11 +748,29 @@ export const MriViewer: React.FC<MriViewerProps> = ({
             setZoom(1);
             setPan({ x: 0, y: 0 });
           }}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-colors"
+          className="p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors"
           title="Reset Zoom & Pan"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
+          <RotateCcw className="w-4 h-4" />
         </button>
+
+        <div className="h-px bg-slate-800 my-0.5" />
+
+        {/* Theater / 100% Canvas Mode Toggle Button */}
+        {onToggleSidebar && (
+          <button
+            id="btn-theater-mode-toggle"
+            onClick={onToggleSidebar}
+            className={`p-2 rounded-lg transition-colors ${
+              !isSidebarOpen
+                ? 'bg-[#00E5FF]/20 text-[#00E5FF]'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+            }`}
+            title={isSidebarOpen ? "Theater Mode: 100% Full Viewport (T)" : "Show Diagnostic Intelligence Panel (T)"}
+          >
+            {!isSidebarOpen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+        )}
       </div>
 
       {/* Main SVG MRI Canvas (Centered, filling available space) */}
@@ -590,11 +779,15 @@ export const MriViewer: React.FC<MriViewerProps> = ({
           transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
           transition: activeTool === 'pan' ? 'none' : 'transform 0.15s ease-out'
         }}
-        className="w-full h-full flex items-center justify-center p-6"
+        className="w-full h-full flex items-center justify-center p-4 sm:p-6 transition-all duration-300 ease-in-out"
       >
         <svg
           viewBox="0 0 100 100"
-          className="w-full h-full max-w-[560px] max-h-[560px] aspect-square rounded-2xl shadow-2xl cursor-crosshair"
+          className={`w-full h-full aspect-square rounded-2xl shadow-2xl cursor-crosshair transition-all duration-300 ease-in-out ${
+            !isSidebarOpen
+              ? 'max-w-[700px] max-h-[700px] xl:max-w-[760px] xl:max-h-[760px] 2xl:max-w-[840px] 2xl:max-h-[840px]'
+              : 'max-w-[560px] max-h-[560px] xl:max-w-[620px] xl:max-h-[620px]'
+          }`}
           style={getFilterStyles(wlPreset, invert, activeWw, activeWl)}
           onClick={handleCanvasClick}
           onMouseMove={handleMouseMove}
@@ -604,49 +797,51 @@ export const MriViewer: React.FC<MriViewerProps> = ({
       </div>
 
       {/* Bottom Floating HUD: Scrubber, Play/Pause, Slice Counter, CAM Toggle & Windowing */}
-      <div className="absolute bottom-3 left-3 right-3 z-30 flex flex-col items-center gap-2 pointer-events-auto">
-        {/* Slice Finding Toast if present */}
+      <div className="absolute bottom-4 left-4 right-4 z-30 flex flex-col items-center gap-2.5 pointer-events-auto">
+        {/* Slice Finding Toast if present - 13px crisp white text */}
         {currentSliceData.findings && (
-          <div className="bg-[#0B0F19]/90 border border-[#00E5FF33] px-3 py-1 rounded-lg backdrop-blur-md text-[11px] text-slate-300 flex items-center gap-2 shadow-lg max-w-xl truncate">
-            <Info className="w-3 h-3 text-[#00E5FF] shrink-0" />
-            <span className="truncate">
+          <div className="bg-[#0B0F19]/95 border border-[#00E5FF44] px-4 py-2 rounded-xl backdrop-blur-xl text-[13px] text-white flex items-center gap-2.5 shadow-2xl max-w-2xl">
+            <Info className="w-4 h-4 text-[#00E5FF] shrink-0" />
+            <span className="font-medium truncate">
               <span className="font-bold text-[#00E5FF]">Slice {sliceIndex}: </span>
               {currentSliceData.findings}
             </span>
           </div>
         )}
 
-        {/* Floating Minimal Glass HUD Bar */}
-        <div className="w-full max-w-2xl bg-[#0B0F19]/90 border border-[#1E293B] rounded-xl px-3 py-2 backdrop-blur-xl shadow-2xl flex items-center gap-3">
-          {/* Play/Pause Minimal Icon */}
+        {/* Floating Minimal Glass HUD Bar - h-12 with accessible controls */}
+        <div className="w-full max-w-2xl h-12 bg-[#0B0F19]/90 border border-slate-800 rounded-2xl px-4 backdrop-blur-xl shadow-2xl flex items-center gap-3.5">
+          {/* Play/Pause Minimal Icon (w-5 h-5) */}
           <button
             id="btn-hud-play-pause"
             onClick={() => setIsPlaying(p => !p)}
-            className="p-1.5 rounded-lg bg-[#111827] hover:bg-slate-800 text-[#00E5FF] transition-all shrink-0 border border-slate-800"
+            className="p-2 rounded-xl bg-[#111827] hover:bg-slate-800 text-[#00E5FF] transition-all shrink-0 border border-slate-800 shadow-sm"
             title={isPlaying ? "Pause Cine Playback (Space)" : "Play Cine Loop (Space)"}
           >
-            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
           </button>
 
           {/* Prev / Next Step Buttons */}
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               id="btn-hud-slice-prev"
               onClick={() => setSliceIndex(prev => Math.max(1, prev - 1))}
-              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800/60"
+              className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800/80 transition-colors"
+              title="Previous Slice (←)"
             >
-              <ChevronLeft className="w-3.5 h-3.5" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               id="btn-hud-slice-next"
               onClick={() => setSliceIndex(prev => Math.min(totalSlices, prev + 1))}
-              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800/60"
+              className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800/80 transition-colors"
+              title="Next Slice (→)"
             >
-              <ChevronRight className="w-3.5 h-3.5" />
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Elegant Thin Scrubber Line */}
+          {/* Scrubber Line */}
           <div className="flex-1 flex items-center gap-2 min-w-0">
             <input
               type="range"
@@ -655,24 +850,24 @@ export const MriViewer: React.FC<MriViewerProps> = ({
               max={totalSlices}
               value={sliceIndex}
               onChange={e => setSliceIndex(Number(e.target.value))}
-              className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#00E5FF]"
+              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#00E5FF]"
             />
           </div>
 
-          {/* Slice Label "12 / 20" */}
-          <div className="font-mono text-xs font-bold text-[#00E5FF] shrink-0 min-w-[50px] text-right">
-            {sliceIndex} / {totalSlices}
+          {/* Slice Label "Slice 12 / 20" - High-visibility bold white */}
+          <div className="font-mono text-sm font-bold text-white shrink-0 min-w-[90px] text-right tracking-tight">
+            Slice {sliceIndex} / {totalSlices}
           </div>
 
-          <div className="h-4 w-px bg-slate-800 shrink-0" />
+          <div className="h-5 w-px bg-slate-800 shrink-0" />
 
           {/* Window Preset Selector Quick Pill */}
           <select
             id="select-hud-window"
             value={wlPreset}
             onChange={e => handleSelectPreset(e.target.value)}
-            className="bg-[#111827] border border-[#1E293B] text-slate-300 text-[11px] font-medium rounded-lg px-2 py-1 outline-none cursor-pointer hover:border-slate-700 shrink-0"
-            title="Windowing Preset"
+            className="bg-[#111827] border border-slate-800 text-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer hover:border-slate-700 shrink-0"
+            title="Windowing Preset (W)"
           >
             <option value="SoftTissue">Soft Tissue</option>
             <option value="Bone">Bone</option>
@@ -681,23 +876,139 @@ export const MriViewer: React.FC<MriViewerProps> = ({
             <option value="Cartilage">Cartilage</option>
           </select>
 
-          {/* Subtle CAM / Grad-CAM Attention Toggle */}
+          {/* Attention Heatmap (Grad-CAM) Toggle */}
           <button
             id="btn-hud-toggle-cam"
             onClick={() => setShowHeatmap(prev => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all shrink-0 ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all shrink-0 ${
               showHeatmap
-                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 shadow-sm'
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-sm'
                 : 'bg-[#111827] text-slate-400 border-slate-800 hover:text-slate-200'
             }`}
-            title="Toggle Attention Heatmap (Grad-CAM)"
+            title="Toggle Attention Heatmap (Grad-CAM) [C]"
           >
-            <Sparkles className="w-3 h-3" />
-            <span className="hidden sm:inline text-[11px]">CAM</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline text-xs">CAM</span>
           </button>
         </div>
       </div>
+
+      {/* SLEEK DARK-GLASS KEYBOARD SHORTCUTS HUD & HELP MODAL */}
+      {isHelpModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0A0E17] border border-slate-700/80 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-[#00E5FF15] text-[#00E5FF] border border-[#00E5FF33]">
+                  <Keyboard className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white tracking-tight">
+                    Workstation Keyboard Shortcuts
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    High-speed navigation for radiologists & judges
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsHelpModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Play / Pause Cine Loop</span>
+                <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                  Space
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Step Slice by Slice</span>
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    ←
+                  </kbd>
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    →
+                  </kbd>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Switch MRI Planes (Sag / Cor / Ax)</span>
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    1
+                  </kbd>
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    2
+                  </kbd>
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    3
+                  </kbd>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Toggle Grad-CAM Heatmap</span>
+                <kbd className="px-2.5 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                  C
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Cycle Window / Level Presets</span>
+                <kbd className="px-2.5 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                  W
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Toggle Theater Mode (100% Canvas)</span>
+                <kbd className="px-2.5 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                  T
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Toggle Fullscreen Display</span>
+                <kbd className="px-2.5 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                  F
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#0D131F] border border-slate-800">
+                <span className="text-slate-300 font-medium">Open / Close Help Overlay</span>
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    ?
+                  </kbd>
+                  <span className="text-slate-500 font-mono">or</span>
+                  <kbd className="px-2 py-1 bg-slate-800 rounded-lg text-white font-mono text-[11px] border border-slate-700 shadow-sm">
+                    Esc
+                  </kbd>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setIsHelpModalOpen(false)}
+                className="w-full py-2 bg-[#00E5FF] text-[#07090E] font-bold text-xs rounded-xl shadow-md transition-all hover:brightness-110"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 

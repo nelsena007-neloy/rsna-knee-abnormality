@@ -1,4 +1,4 @@
-import { AbnormalityKey, AbnormalityMeta } from '../types';
+import { AbnormalityKey, AbnormalityMeta, ViewPlane } from '../types';
 
 export const ABNORMALITIES_META: Record<AbnormalityKey, AbnormalityMeta> = {
   'ACL': {
@@ -293,6 +293,21 @@ export const ALL_ABNORMALITY_KEYS: AbnormalityKey[] = [
   'Contusion',
   'Fracture'
 ];
+
+export const ABNORMALITY_KEY_SLICES: Record<AbnormalityKey, { plane: ViewPlane; slice: number }> = {
+  'ACL': { plane: 'Sagittal', slice: 12 },
+  'MCL': { plane: 'Coronal', slice: 10 },
+  'Medial Meniscus': { plane: 'Sagittal', slice: 10 },
+  'Lateral Meniscus': { plane: 'Coronal', slice: 10 },
+  'Medial OA': { plane: 'Coronal', slice: 10 },
+  'Lateral OA': { plane: 'Coronal', slice: 10 },
+  'PF OA': { plane: 'Axial', slice: 8 },
+  'Effusion': { plane: 'Sagittal', slice: 12 },
+  'Synovitis': { plane: 'Axial', slice: 8 },
+  "Baker's": { plane: 'Axial', slice: 14 },
+  'Contusion': { plane: 'Sagittal', slice: 8 },
+  'Fracture': { plane: 'Coronal', slice: 10 }
+};
 
 export const CATEGORY_COLORS = {
   Ligament: 'border-red-500/30 text-red-400 bg-red-500/10',

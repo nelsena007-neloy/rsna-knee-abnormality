@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StudyInstance, PredictionResult } from '../types';
-import { Bot, Send, Sparkles, X, User, ShieldCheck, ChevronRight } from 'lucide-react';
+import { StudyInstance, PredictionResult, ModelSettingsConfig } from '../types';
+import { Bot, Send, Sparkles, X, User, ShieldCheck, ChevronRight, Sliders, Cpu } from 'lucide-react';
 
 interface CopilotDrawerProps {
   isOpen: boolean;
@@ -8,6 +8,8 @@ interface CopilotDrawerProps {
   currentStudy: StudyInstance;
   predictions: Record<string, number>;
   aiExplanation?: PredictionResult | null;
+  modelSettings?: ModelSettingsConfig;
+  onUpdateModelSettings?: (settings: Partial<ModelSettingsConfig>) => void;
 }
 
 interface ChatMessage {
@@ -22,13 +24,20 @@ export const CopilotDrawer: React.FC<CopilotDrawerProps> = ({
   onClose,
   currentStudy,
   predictions,
-  aiExplanation
+  aiExplanation,
+  modelSettings = {
+    selectedModel: 'gemini-2.5-pro',
+    temperature: 0.1,
+    topP: 0.85,
+    responseFormat: 'JSON'
+  },
+  onUpdateModelSettings
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
-      content: `Hello! I am your RSNA Knee AI Diagnostic Copilot. I'm ready to assist with clinical interpretation, multimodal feature extraction, and ROC-AUC calibration for patient **${currentStudy.patientId}** (${currentStudy.patientAge}yo ${currentStudy.patientGender}).\n\nAsk me about MRI sequence findings, ACL/MCL ligamentous integrity, meniscal root vs radial tears, or competition modeling strategies!`,
+      content: `Welcome to the **RSNA MSK Radiologist Copilot**. I am configured to support clinical decision-making, triplanar anatomic correlation, and RSNA 12-target risk stratification for patient **${currentStudy.patientId}** (${currentStudy.patientAge}yo ${currentStudy.patientGender}, ${currentStudy.kneeSide} knee).\n\nModel parameters: **${modelSettings.selectedModel.includes('pro') ? 'Gemini Pro' : 'Gemini Flash'}** | Temp: **${modelSettings.temperature}** | Top_P: **${modelSettings.topP}** | Structured JSON Enabled.\n\nFeel free to query specific slice coordinates, biomechanical injury patterns, ligamentous/meniscal integrity, or surgical vs. conservative recommendations.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -65,6 +74,9 @@ export const CopilotDrawer: React.FC<CopilotDrawerProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [...messages, userMsg],
+          model: modelSettings.selectedModel,
+          temperature: modelSettings.temperature,
+          topP: modelSettings.topP,
           currentStudyContext: {
             patientId: currentStudy.patientId,
             age: currentStudy.patientAge,
@@ -122,7 +134,7 @@ export const CopilotDrawer: React.FC<CopilotDrawerProps> = ({
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-slate-950/95 border-l border-slate-800 shadow-2xl backdrop-blur-md flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+      <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/30">
             <Bot className="w-5 h-5" />
@@ -130,12 +142,13 @@ export const CopilotDrawer: React.FC<CopilotDrawerProps> = ({
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               Gemini MSK Radiologist Copilot
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/40 font-mono">
-                Flash 3.7
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/40 font-mono font-bold">
+                {modelSettings.selectedModel.includes('pro') ? 'Pro 2.5' : 'Flash 2.5'}
               </span>
             </h3>
-            <p className="text-[11px] text-slate-400">
-              Grounded in current study {currentStudy.patientId}
+            <p className="text-[11px] text-slate-400 flex items-center gap-2">
+              <span>Study {currentStudy.patientId}</span>
+              <span className="font-mono text-[#00E5FF] text-[10px]">T: {modelSettings.temperature} | P: {modelSettings.topP}</span>
             </p>
           </div>
         </div>
