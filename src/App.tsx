@@ -3,9 +3,10 @@ import { StudyInstance, ViewPlane, AbnormalityKey, EnsembleConfig, PredictionRes
 import { MOCK_STUDIES } from './data/mockStudies';
 import { ABNORMALITIES_META } from './data/abnormalities';
 import { calculateEvaluationMetrics } from './utils/metrics';
-import { Navbar, ActiveTab } from './components/Navbar';
+import { Navbar, type ActiveTab } from './components/Navbar';
 import { MriViewer } from './components/MriViewer';
-import { PrintableClinicalReport, ReportData } from './components/PrintableClinicalReport';
+import { PrintableClinicalReport, type ReportData, type PrintableKeySlice, type PrintOptions } from './components/PrintableClinicalReport';
+import { PrintCustomizationModal } from './components/PrintCustomizationModal';
 import { DiagnosticIntelligencePane } from './components/DiagnosticIntelligencePane';
 import { ModelArchitecture } from './components/ModelArchitecture';
 import { EvaluationDashboard } from './components/EvaluationDashboard';
@@ -24,13 +25,22 @@ export function App() {
   const [currentPlane, setCurrentPlane] = useState<ViewPlane>('Sagittal');
   const [activeAbnormality, setActiveAbnormality] = useState<AbnormalityKey | null>('ACL');
   const [targetSliceIndex, setTargetSliceIndex] = useState<number | undefined>(12);
+  const [currentSliceIndex, setCurrentSliceIndex] = useState<number>(12);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isRecommendationsOpen, setIsRecommendationsOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isIngestionModalOpen, setIsIngestionModalOpen] = useState<boolean>(false);
   const [selectedIngestionStream, setSelectedIngestionStream] = useState<IngestionStream>('PACS_DICOM');
   const [isPredicting, setIsPredicting] = useState<boolean>(false);
+
+  const [printOptions, setPrintOptions] = useState<PrintOptions>({
+    includeKeySlice: true,
+    includeMatrix: true,
+    includeImpression: true,
+    includeAttestation: true
+  });
 
   // Model Settings & Parameters (Gemini Pro/Flash, Temp 0.1, Top P 0.85, JSON Schema)
   const [modelSettings, setModelSettings] = useState<ModelSettingsConfig>({
@@ -194,50 +204,129 @@ export function App() {
     setIsIngestionModalOpen(true);
   };
 
-  return (
-    <div className="h-screen w-screen overflow-hidden bg-[#07090E] text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-[#07090E]">
-      {/* 1. Consolidated 48px Header Bar */}
-      <Navbar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        studies={studies}
-        selectedStudyId={selectedStudyId}
-        onSelectStudy={study => {
-          setSelectedStudyId(study.patientId);
-          setActiveAbnormality(null);
-        }}
-        onCustomUpload={handleCustomUpload}
-        macroAuc={macroAuc}
-        onRunAiPrediction={() => runMultimodalPrediction(currentStudy)}
-        isPredicting={isPredicting}
-        onOpenCopilot={() => setIsCopilotOpen(true)}
-        onExportReport={() => setIsExportModalOpen(true)}
-        onOpenIngestionModal={handleOpenIngestionModal}
-      />
+  const handleTriggerPrint = () => {
+    try {
+      window.focus();
+      setTimeout(() => {
+        window.print();
+      }, 50);
+    } catch (err) {
+      console.warn('Native window.print failed:', err);
+      window.print();
+    }
+  };
 
-      {/* 2. Main Workspace (Locked 100vh Viewport) */}
-      {activeTab === 'viewer' ? (
-        /* Collapsible 2-Pane Layout (Adaptive 65% / 100% Canvas + 35% Intelligence Drawer) */
-        <main className="flex-1 flex min-h-0 overflow-hidden relative">
-          {/* Left Column (Adaptive Width: 65% when open, 100% when collapsed): Hero Diagnostic Viewport */}
-          <div className={`h-full min-h-0 relative transition-all duration-300 ease-in-out ${
-            isSidebarOpen ? 'w-[65%]' : 'w-full'
-          }`}>
-            <MriViewer
-              currentPlane={currentPlane}
-              onPlaneChange={setCurrentPlane}
-              slices={currentStudy.slices}
-              activeAbnormality={activeAbnormality}
-              onSelectAbnormality={handleSelectAbnormality}
-              sourceFidelity={currentStudy.sourceFidelity || '16-bit Native Volumetric'}
-              ingestionStream={currentStudy.ingestionStream || 'PACS_DICOM'}
-              onOpenIngestionModal={() => handleOpenIngestionModal(currentStudy.ingestionStream || 'PACS_DICOM')}
-              targetSliceIndex={targetSliceIndex}
-              isSidebarOpen={isSidebarOpen}
-              onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
-              abnormalCount={Object.values(currentPredictions).filter(v => Number(v ?? 0) >= 0.50).length}
-              macroAuc={macroAuc}
-            />
+  // Global Ctrl+P / Cmd+P shortcut listener to directly trigger native print
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handleTriggerPrint();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Derive active MRI key slice data for the clinical print report
+  const activeSliceList = currentPlane === 'Sagittal'
+    ? currentStudy.slices.sagittal
+    : currentPlane === 'Coronal'
+    ? currentStudy.slices.coronal
+    : currentStudy.slices.axial;
+  const activeSliceData = activeSliceList[Math.min(currentSliceIndex - 1, activeSliceList.length - 1)] || activeSliceList[0];
+  const activeSliceMeta = activeAbnormality ? ABNORMALITIES_META[activeAbnormality] : undefined;
+
+  const keySliceData: PrintableKeySlice = {
+    plane: currentPlane,
+    sliceIndex: currentSliceIndex,
+    totalSlices: activeSliceList.length,
+    sequenceName: activeSliceData?.sequenceName || `${currentPlane} PD-FS`,
+    thicknessMm: activeSliceData?.thicknessMm || 3.0,
+    findings: activeSliceData?.findings || activeSliceMeta?.description || "Diagnostic multiplanar MR sequences demonstrating knee anatomy and joint integrity.",
+    associatedAbnormality: activeAbnormality,
+    confidence: activeAbnormality ? currentPredictions[activeAbnormality] : undefined,
+    pathologyHighlights: activeSliceData?.pathologyHighlights
+  };
+
+  const printableReportData: ReportData = {
+    caseId: currentStudy.patientId,
+    patientInfo: `${currentStudy.patientAge} yo / ${currentStudy.patientGender === 'M' ? 'Male (M)' : 'Female (F)'}`,
+    laterality: `${currentStudy.kneeSide} Knee`,
+    technique: "Multiplanar 3.0T MRI (Sagittal PD-FS, Coronal T2-FS, Axial PD-FS)",
+    indication: currentStudy.clinicalIndication || currentStudy.report?.clinicalHistory || "Knee MRI evaluation for acute trauma and ligamentous stability",
+    studyDate: currentStudy.studyDate || "2026-08-25",
+    aiImpression: aiExplanations[currentStudy.patientId]?.clinicalReasoning ||
+      (currentStudy.report?.impression ? currentStudy.report.impression.join('\n• ') : 'Volumetric deep learning evaluation confirms focal ligamentous tear with empty notch sign and corresponding bone contusion. Orthopedic sports medicine consultation recommended.'),
+    targets: (Object.keys(ABNORMALITIES_META) as AbnormalityKey[]).map(key => {
+      const meta = ABNORMALITIES_META[key];
+      const prob = currentPredictions[key] ?? 0;
+      return {
+        name: meta.shortName,
+        category: meta.category,
+        plane: meta.primaryPlane,
+        prob: prob,
+        status: prob >= 0.50 ? ('POSITIVE' as const) : ('NORMAL' as const)
+      };
+    }),
+    keySlice: keySliceData,
+    options: printOptions,
+    timestamp: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    macroAuc: macroAuc
+  };
+
+  return (
+    <>
+      {/* ── INTERACTIVE WORKSPACE ROOT (Hidden during print) ── */}
+      <div
+        id="interactive-app-root"
+        className="h-screen w-screen overflow-hidden bg-[#07090E] text-slate-100 flex flex-col font-sans selection:bg-[#00E5FF] selection:text-[#07090E] print:hidden"
+      >
+        {/* 1. Consolidated 48px Header Bar */}
+        <Navbar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          studies={studies}
+          selectedStudyId={selectedStudyId}
+          onSelectStudy={study => {
+            setSelectedStudyId(study.patientId);
+            setActiveAbnormality(null);
+          }}
+          onCustomUpload={handleCustomUpload}
+          macroAuc={macroAuc}
+          onRunAiPrediction={() => runMultimodalPrediction(currentStudy)}
+          isPredicting={isPredicting}
+          onOpenCopilot={() => setIsCopilotOpen(true)}
+          onExportReport={() => setIsExportModalOpen(true)}
+          onOpenIngestionModal={handleOpenIngestionModal}
+          onPrintReport={handleTriggerPrint}
+          onOpenPrintModal={() => setIsPrintModalOpen(true)}
+        />
+
+        {/* 2. Main Workspace (Locked 100vh Viewport) */}
+        {activeTab === 'viewer' ? (
+          /* Collapsible 2-Pane Layout (Adaptive 65% / 100% Canvas + 35% Intelligence Drawer) */
+          <main className="flex-1 flex min-h-0 overflow-hidden relative">
+            {/* Left Column (Adaptive Width: 65% when open, 100% when collapsed): Hero Diagnostic Viewport */}
+            <div className={`h-full min-h-0 relative transition-all duration-300 ease-in-out ${
+              isSidebarOpen ? 'w-[65%]' : 'w-full'
+            }`}>
+              <MriViewer
+                currentPlane={currentPlane}
+                onPlaneChange={setCurrentPlane}
+                slices={currentStudy.slices}
+                activeAbnormality={activeAbnormality}
+                onSelectAbnormality={handleSelectAbnormality}
+                sourceFidelity={currentStudy.sourceFidelity || '16-bit Native Volumetric'}
+                ingestionStream={currentStudy.ingestionStream || 'PACS_DICOM'}
+                onOpenIngestionModal={() => handleOpenIngestionModal(currentStudy.ingestionStream || 'PACS_DICOM')}
+                targetSliceIndex={targetSliceIndex}
+                onSliceChange={setCurrentSliceIndex}
+                isSidebarOpen={isSidebarOpen}
+                onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+                abnormalCount={Object.values(currentPredictions).filter(v => Number(v ?? 0) >= 0.50).length}
+                macroAuc={macroAuc}
+              />
 
             {/* Floating Side Collapse Toggle Tab Docked on the right edge of DICOM canvas */}
             <button
@@ -381,31 +470,23 @@ export function App() {
         initialStream={selectedIngestionStream}
       />
 
-      {/* ── PRINT-ONLY CLINICAL DISPATCH DOCUMENT ── */}
-      <PrintableClinicalReport
-        data={{
-          caseId: currentStudy.patientId,
-          patientInfo: `${currentStudy.patientAge} yo / ${currentStudy.patientGender === 'M' ? 'Male (M)' : 'Female (F)'}`,
-          laterality: `${currentStudy.kneeSide} Knee`,
-          technique: "Multiplanar 3.0T MRI (Sagittal PD-FS, Coronal T2-FS, Axial PD-FS)",
-          indication: currentStudy.history,
-          studyDate: currentStudy.studyDate || "2026-08-25",
-          aiImpression: aiExplanations[currentStudy.patientId]?.impression ||
-            'Evaluation confirms multi-target volumetric analysis with high diagnostic certainty. Correlated with clinical presentation and cross-planar multi-slice context attention windows.',
-          targets: (Object.keys(ABNORMALITIES_META) as AbnormalityKey[]).map(key => {
-            const meta = ABNORMALITIES_META[key];
-            const prob = currentPredictions[key] ?? 0;
-            return {
-              name: meta.shortName,
-              category: meta.category,
-              plane: meta.primaryPlane,
-              prob: prob,
-              status: prob >= 0.50 ? ('POSITIVE' as const) : ('NORMAL' as const)
-            };
-          })
-        }}
+      {/* Pre-Print Customization Preferences Modal */}
+      <PrintCustomizationModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        onConfirmPrint={handleTriggerPrint}
+        onExportPdf={() => setIsExportModalOpen(true)}
+        reportData={printableReportData}
+        options={printOptions}
+        onOptionsChange={setPrintOptions}
       />
     </div>
+
+    {/* ── DEDICATED PRINT-ONLY CLINICAL DISPATCH DOCUMENT (Displayed exclusively when browser print dialogue opens) ── */}
+    <div className="hidden print:block printable-clinical-report">
+      <PrintableClinicalReport data={printableReportData} />
+    </div>
+  </>
   );
 }
 

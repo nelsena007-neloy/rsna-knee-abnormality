@@ -27,23 +27,75 @@
 }
 
 @media print {
+  /* 1. Hide all interactive interface chrome, navbar, sliders, video controls, modals, sidebars */
+  #interactive-app-root,
+  .no-print,
+  .print-hidden,
+  .print\:hidden,
   header,
+  nav,
   aside,
-  input[type="range"],
   button,
-  .print\:hidden {
+  input,
+  input[type="range"],
+  .custom-scrollbar,
+  #btn-toggle-sidebar,
+  [role="dialog"] {
     display: none !important;
   }
 
-  html, body {
+  /* 2. Reset document root, body, and html for high-fidelity clinical print layout */
+  html,
+  body {
+    background-color: #FFFFFF !important;
     background: #FFFFFF !important;
     color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     height: auto !important;
+    min-height: 100% !important;
     overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  }
+
+  #root {
+    background: #FFFFFF !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 3. Show only dedicated clinical dispatch report */
+  .printable-clinical-report {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+  }
+
+  /* 4. Page break avoidance on structured medical sections & table rows */
+  .print-avoid-break,
+  tr,
+  section,
+  footer,
+  header {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   @page {
     size: A4 portrait;
-    margin: 15mm;
+    margin: 10mm 12mm 12mm 12mm;
   }
 }

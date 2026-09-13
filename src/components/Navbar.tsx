@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Activity, Sparkles, ChevronDown, Check, Plus, FolderOpen, Layers, BarChart3, Bot, FileText, Database, Camera, Printer } from 'lucide-react';
+import { Activity, Sparkles, ChevronDown, Check, Plus, FolderOpen, Layers, BarChart3, Bot, FileText, Database, Camera, Printer, Sliders } from 'lucide-react';
 import { StudyInstance, IngestionStream } from '../types';
 
 export type ActiveTab = 'viewer' | 'architecture' | 'leaderboard';
@@ -17,6 +17,8 @@ interface NavbarProps {
   onOpenCopilot?: () => void;
   onExportReport?: () => void;
   onOpenIngestionModal?: (stream?: IngestionStream) => void;
+  onPrintReport: () => void;
+  onOpenPrintModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,7 +33,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   isPredicting,
   onOpenCopilot,
   onExportReport,
-  onOpenIngestionModal
+  onOpenIngestionModal,
+  onPrintReport,
+  onOpenPrintModal
 }) => {
   const [isCaseMenuOpen, setIsCaseMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -188,15 +192,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* ── ZONE 3: TELEMETRY & ACTIONS ── */}
       <div className="flex items-center gap-2.5 shrink-0">
-        <button
-          id="btn-nav-print-report"
-          onClick={() => window.print()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] hover:bg-[#1E293B] text-slate-200 text-xs font-semibold border border-slate-800 transition-colors cursor-pointer"
-          title="Print Standard A4 Radiology Report (Ctrl+P / Cmd+P)"
-        >
-          <Printer className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="hidden sm:inline">Print Report</span>
-        </button>
+        <div className="flex items-center rounded-lg bg-[#0F172A] border border-slate-800 p-0.5">
+          <button
+            id="btn-nav-print-report"
+            onClick={onPrintReport}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-slate-200 hover:text-white text-xs font-semibold hover:bg-[#1E293B] rounded-md transition-colors cursor-pointer"
+            title="Immediately invoke system print dialog (Save as PDF or Physical Printer) [Ctrl+P / ⌘P]"
+          >
+            <Printer className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Print Report</span>
+          </button>
+          {onOpenPrintModal && (
+            <button
+              id="btn-nav-print-options"
+              onClick={onOpenPrintModal}
+              className="px-1.5 py-1 text-slate-400 hover:text-cyan-400 hover:bg-[#1E293B] rounded-md transition-colors cursor-pointer border-l border-slate-800"
+              title="Configure Print Preferences (Key Slices, Matrix, Attestation)"
+            >
+              <Sliders className="w-3 h-3" />
+            </button>
+          )}
+        </div>
 
         {onOpenIngestionModal && (
           <button

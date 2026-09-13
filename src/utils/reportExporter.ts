@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf';
 import { StudyInstance, AbnormalityKey, PredictionResult, EnsembleConfig } from '../types';
 import { ABNORMALITIES_META } from '../data/abnormalities';
 
@@ -201,12 +200,13 @@ export function exportStudyToJson(
 /**
  * Exports the current study as an institutional-grade structured PDF report.
  */
-export function exportStudyToPdf(
+export async function exportStudyToPdf(
   study: StudyInstance,
   predictions: Record<AbnormalityKey, number>,
   aiExplanation?: PredictionResult,
   ensembleConfig?: EnsembleConfig
-): void {
+): Promise<void> {
+  const { jsPDF } = await import('jspdf');
   const data = buildStructuredReportData(study, predictions, aiExplanation, ensembleConfig);
   const doc = new jsPDF({
     orientation: 'portrait',

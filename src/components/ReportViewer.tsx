@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StudyInstance, AbnormalityKey } from '../types';
-import { FileText, Edit3, CheckCircle2, Sparkles, CornerDownRight, AlertCircle, Sparkle, Download } from 'lucide-react';
+import { FileText, Edit3, CheckCircle2, Sparkles, CornerDownRight, AlertCircle, Download } from 'lucide-react';
 
 interface ReportViewerProps {
   study: StudyInstance;

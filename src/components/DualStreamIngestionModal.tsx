@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   Database,
@@ -9,15 +9,9 @@ import {
   FileText,
   Sparkles,
   Layers,
-  Cpu,
-  ArrowRight,
-  Eye,
-  Sliders,
-  Check,
-  RefreshCw,
-  FolderOpen
+  Check
 } from 'lucide-react';
-import { IngestionStream, SourceFidelity, StudyInstance, FilmGridTile, ViewPlane } from '../types';
+import { IngestionStream, StudyInstance, FilmGridTile } from '../types';
 
 interface DualStreamIngestionModalProps {
   isOpen: boolean;
@@ -37,6 +31,11 @@ export const DualStreamIngestionModal: React.FC<DualStreamIngestionModalProps> =
   const [progressStep, setProgressStep] = useState<string>('');
   const [gridShape, setGridShape] = useState<[number, number]>([3, 4]); // 3 rows x 4 cols = 12 tiles
 
+  // DICOM File Picker & Dropzone State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+
   // PACS Form State
   const [pacsPatientId, setPacsPatientId] = useState<string>('RSNA-PACS-8091');
   const [pacsMagnetStrength, setPacsMagnetStrength] = useState<'3.0T' | '1.5T'>('3.0T');
@@ -51,7 +50,50 @@ export const DualStreamIngestionModal: React.FC<DualStreamIngestionModalProps> =
     'Clinical History: 31yo skier following acute high-velocity twisting fall with severe lateral knee pain and gross laxity.\nFindings: Complete midsubstance tear of the ACL with empty notch sign. Segond avulsion fracture fragment off the anterolateral proximal tibial rim. Severe lateral compartment bone contusion. Large hemarthrosis.\nImpression: 1. Segond fracture. 2. Complete ACL tear. 3. Lateral meniscus tear. 4. Large hemarthrosis.'
   );
   const [detectedTiles, setDetectedTiles] = useState<FilmGridTile[]>([]);
-  const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
+
+  // File selection & drag-and-drop handlers
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const filesArray: File[] = Array.from(e.target.files);
+      setSelectedFiles(filesArray);
+      const firstFile = filesArray[0];
+      if (firstFile) {
+        const cleanName = firstFile.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '');
+        if (cleanName && cleanName.length >= 3) {
+          setPacsPatientId(`DICOM-${cleanName.toUpperCase().slice(0, 14)}`);
+        }
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filesArray: File[] = Array.from(e.dataTransfer.files);
+      setSelectedFiles(filesArray);
+      const firstFile = filesArray[0];
+      if (firstFile) {
+        const cleanName = firstFile.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '');
+        if (cleanName && cleanName.length >= 3) {
+          setPacsPatientId(`DICOM-${cleanName.toUpperCase().slice(0, 14)}`);
+        }
+      }
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -139,11 +181,18 @@ export const DualStreamIngestionModal: React.FC<DualStreamIngestionModalProps> =
       setPacsMagnetStrength('3.0T');
       setPacsSliceThickness(3.0);
       setPacsIndication('24yo male, non-contact decelerating injury playing basketball with audible pop, immediate hemarthrosis and inability to bear weight.');
+      const sampleFile1 = new File(['[DICOM 3.0 Series Header + 16-bit Array]'], 'RSNA_8091_SAG_PD_FS.dcm', { type: 'application/dicom' });
+      const sampleFile2 = new File(['[DICOM 3.0 Series Header + 16-bit Array]'], 'RSNA_8091_COR_T2_FS.dcm', { type: 'application/dicom' });
+      const sampleFile3 = new File(['[DICOM 3.0 Series Header + 16-bit Array]'], 'RSNA_8091_AX_PD_FS.dcm', { type: 'application/dicom' });
+      setSelectedFiles([sampleFile1, sampleFile2, sampleFile3]);
     } else {
       setPacsPatientId('RSNA-PACS-4312');
       setPacsMagnetStrength('1.5T');
       setPacsSliceThickness(3.5);
       setPacsIndication('68yo female with progressive medial and patellofemoral knee pain, joint stiffness, and Baker cyst.');
+      const sampleFile1 = new File(['[DICOM 3.0 Series Header + 16-bit Array]'], 'RSNA_4312_COR_T2_FS.dcm', { type: 'application/dicom' });
+      const sampleFile2 = new File(['[DICOM 3.0 Series Header + 16-bit Array]'], 'RSNA_4312_AX_PD.dcm', { type: 'application/dicom' });
+      setSelectedFiles([sampleFile1, sampleFile2]);
     }
   };
 
@@ -300,19 +349,75 @@ export const DualStreamIngestionModal: React.FC<DualStreamIngestionModalProps> =
               </div>
 
               {/* DICOM File Dropzone */}
-              <div className="border-2 border-dashed border-[#1E293B] hover:border-[#00E5FF]/50 rounded-2xl p-6 bg-[#080C14] text-center transition-all">
-                <UploadCloud className="w-8 h-8 text-[#00E5FF] mx-auto mb-2 opacity-80" />
-                <h4 className="text-xs font-bold text-white mb-1">
-                  Drag & Drop DICOM Series (.dcm, .tar.gz, DICOMDIR)
-                </h4>
-                <p className="text-[11px] text-slate-400 max-w-md mx-auto mb-3">
-                  Automatic direction cosines calculation (ImageOrientationPatient) maps Sagittal, Coronal, and Axial planes with dynamic RescaleSlope/Intercept calibration.
-                </p>
-                <div className="inline-flex items-center gap-2 text-[10px] font-mono text-slate-500 bg-[#0B0F19] px-3 py-1 rounded-full border border-slate-800">
-                  <span>C-STORE Listener: 0.0.0.0:104</span>
-                  <span>•</span>
-                  <span>AET: RSNA_PACS</span>
-                </div>
+              <div
+                id="dropzone-pacs-dicom"
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-2xl p-6 bg-[#080C14] text-center transition-all cursor-pointer group ${
+                  isDragging
+                    ? 'border-[#00E5FF] bg-[#00E5FF]/10 scale-[1.005]'
+                    : selectedFiles.length > 0
+                    ? 'border-emerald-500/50 bg-emerald-950/15 hover:border-emerald-400'
+                    : 'border-[#1E293B] hover:border-[#00E5FF]/50 hover:bg-[#0B0F19]'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  multiple
+                  accept=".dcm,.tar.gz,.zip,application/dicom"
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                />
+
+                {selectedFiles.length > 0 ? (
+                  <div className="space-y-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white">
+                        {selectedFiles.length} DICOM {selectedFiles.length === 1 ? 'Series File' : 'Series Files'} Selected
+                      </h4>
+                      <p className="text-[11px] text-emerald-400 font-medium mt-0.5">
+                        Ready for 16-bit multiplanar volumetric tensor calibration
+                      </p>
+                    </div>
+
+                    {/* Display Selected File Names */}
+                    <div className="max-h-28 overflow-y-auto custom-scrollbar bg-[#0B0F19] rounded-lg p-2.5 border border-slate-800 text-left text-[11px] font-mono space-y-1">
+                      {selectedFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between gap-2 text-slate-300">
+                          <span className="truncate text-cyan-300">📄 {file.name}</span>
+                          <span className="text-[10px] text-slate-500 shrink-0">
+                            {(file.size / 1024).toFixed(0)} KB
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-[10px] text-slate-400">
+                      Click anywhere inside this zone or drop new files to change selection.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="w-8 h-8 text-[#00E5FF] mx-auto mb-2 opacity-80 group-hover:scale-110 transition-transform" />
+                    <h4 className="text-xs font-bold text-white mb-1">
+                      Drag & Drop DICOM Series (.dcm, .tar.gz, DICOMDIR)
+                    </h4>
+                    <p className="text-[11px] text-slate-400 max-w-md mx-auto mb-3">
+                      Click anywhere to browse or drop DICOM series. Automatic direction cosines calculation (ImageOrientationPatient) maps Sagittal, Coronal, and Axial planes with dynamic RescaleSlope/Intercept calibration.
+                    </p>
+                    <div className="inline-flex items-center gap-2 text-[10px] font-mono text-slate-500 bg-[#0B0F19] px-3 py-1 rounded-full border border-slate-800">
+                      <span>C-STORE Listener: 0.0.0.0:104</span>
+                      <span>•</span>
+                      <span>AET: RSNA_PACS</span>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* PACS Parameters Form */}
@@ -532,8 +637,9 @@ export const DualStreamIngestionModal: React.FC<DualStreamIngestionModalProps> =
               <button
                 id="btn-execute-pacs-ingest"
                 onClick={handlePacsIngest}
-                disabled={isProcessing}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#00B4D8] text-[#07090E] font-bold text-xs shadow-md shadow-[#00E5FF]/20 hover:opacity-95 transition-all disabled:opacity-50"
+                disabled={isProcessing || selectedFiles.length === 0}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#00B4D8] text-[#07090E] font-bold text-xs shadow-md shadow-[#00E5FF]/20 hover:opacity-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title={selectedFiles.length === 0 ? "Select or drop DICOM files to enable ingestion" : "Ingest PACS DICOM Series"}
               >
                 <Database className="w-3.5 h-3.5" />
                 <span>{isProcessing ? 'Ingesting PACS Series...' : 'Ingest PACS DICOM Series'}</span>

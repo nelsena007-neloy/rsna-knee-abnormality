@@ -14,7 +14,6 @@ import {
   Download,
   Edit3,
   Check,
-  RotateCcw,
   Layers,
   ArrowUpRight,
   Info,
@@ -23,9 +22,7 @@ import {
   Copy,
   Cpu,
   ShieldCheck,
-  Zap,
-  Filter,
-  CheckCheck
+  Filter
 } from 'lucide-react';
 
 interface DiagnosticIntelligencePaneProps {

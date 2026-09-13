@@ -20,7 +20,6 @@ import {
   Move,
   SlidersHorizontal,
   ShieldAlert,
-  Sparkle,
   X,
   Check,
   Zap,
@@ -48,6 +47,7 @@ interface MriViewerProps {
   ingestionStream?: string;
   onOpenIngestionModal?: () => void;
   targetSliceIndex?: number;
+  onSliceChange?: (index: number) => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   abnormalCount?: number;
@@ -64,12 +64,17 @@ export const MriViewer: React.FC<MriViewerProps> = ({
   ingestionStream,
   onOpenIngestionModal,
   targetSliceIndex,
+  onSliceChange,
   isSidebarOpen = true,
   onToggleSidebar,
   abnormalCount = 0,
   macroAuc = 1.000
 }) => {
   const [sliceIndex, setSliceIndex] = useState<number>(12);
+
+  useEffect(() => {
+    onSliceChange?.(sliceIndex);
+  }, [sliceIndex, onSliceChange]);
   const [wlPreset, setWlPreset] = useState<string>('SoftTissue');
   const [customWw, setCustomWw] = useState<number | null>(null);
   const [customWl, setCustomWl] = useState<number | null>(null);

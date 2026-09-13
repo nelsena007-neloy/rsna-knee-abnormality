@@ -64,12 +64,19 @@ export const ExportReportModal: React.FC<ExportReportModalProps> = ({
   };
 
   const handlePrint = () => {
-    window.print();
+    try {
+      window.focus();
+      setTimeout(() => {
+        window.print();
+      }, 50);
+    } catch (e) {
+      window.print();
+    }
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto no-print">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
