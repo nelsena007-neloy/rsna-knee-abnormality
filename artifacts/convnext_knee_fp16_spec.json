@@ -1,0 +1,29 @@
+{
+  "engine": "TensorRT / ONNX Runtime FP16",
+  "model_architecture": "ConvNeXt-Small + 12 Disentangled Queries + Anatomical GCN",
+  "precision": "FP16",
+  "pruned_boundary_ratio": 0.25,
+  "input_tensor": [
+    1,
+    48,
+    3,
+    384,
+    384
+  ],
+  "output_targets": [
+    "ACL",
+    "MCL",
+    "Medial Meniscus",
+    "Lateral Meniscus",
+    "Medial OA",
+    "Lateral OA",
+    "PF OA",
+    "Effusion",
+    "Synovitis",
+    "Baker's",
+    "Contusion",
+    "Fracture"
+  ],
+  "target_latency_per_study_ms": 115,
+  "expected_full_test_runtime_minutes": 28.4
+}

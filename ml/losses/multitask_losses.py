@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-Multi-Task Loss Formulations for RSNA Knee Abnormality Detection.
-Includes Asymmetric Loss (ASL), Multi-Label Focal Loss, Pairwise AUC Surrogate Loss,
-and Composite Multi-Task Loss with gradient safety guarantees.
+Multi-Task Loss Formulations & Metric Alignment for RSNA Knee Abnormality Detection.
+Includes:
+- Sample-Weighted Asymmetric Loss (ASL):
+    gamma_neg = 4.0, gamma_pos = 0.0, clip = 0.05
+    Total Loss = weighted_bce_asl(predictions, targets, sample_weights)
+    Mitigates extreme class imbalance on rare pathologies (Fracture, Baker's Cyst, MCL Grade 3)
+- Exact Column-Wise One-vs-Rest Validation Macro-AUC:
+    Evaluates Macro-AUC = (1/12) * sum(AUC_c)
+- Multi-Label Focal Loss & Pairwise AUC Surrogate Loss
+- MultiTaskCompositeLoss with guaranteed zero NaN/Inf gradient propagation.
 """
 
 import math
@@ -30,11 +37,127 @@ TARGET_LOSS_WEIGHTS = {
     "Fracture": 1.40
 }
 
+
+def weighted_bce_asl(
+    predictions: List[List[float]],
+    targets: List[List[float]],
+    sample_weights: Optional[List[float]] = None,
+    gamma_neg: float = 4.0,
+    gamma_pos: float = 0.0,
+    clip: float = 0.05,
+    eps: float = 1e-8
+) -> float:
+    """
+    Computes Sample-Weighted Asymmetric Loss (ASL):
+    Total Loss = weighted_bce_asl(predictions, targets, sample_weights)
+    - gamma_neg = 4.0, gamma_pos = 0.0, clip = 0.05
+    - sample_weights: 1.0 for radiologist ground-truth, 0.70 for pseudo-labeled
+    """
+    batch_size = len(predictions)
+    if batch_size == 0:
+        return 0.0
+
+    num_targets = len(predictions[0])
+    if sample_weights is None:
+        sample_weights = [1.0] * batch_size
+
+    total_weight = sum(sample_weights) or 1.0
+    weighted_loss_sum = 0.0
+
+    for b in range(batch_size):
+        w_b = sample_weights[b]
+        sample_loss = 0.0
+
+        for t in range(num_targets):
+            p = max(eps, min(1.0 - eps, predictions[b][t]))
+            y = targets[b][t]
+            p_m = max(0.0, p - clip) if clip > 0 else p
+
+            if y >= 0.5:
+                pt = p
+                loss_elem = - ((1.0 - pt) ** gamma_pos) * math.log(max(eps, pt))
+            else:
+                pt_neg = p_m
+                loss_elem = - (pt_neg ** gamma_neg) * math.log(max(eps, 1.0 - pt_neg))
+
+            if not (math.isnan(loss_elem) or math.isinf(loss_elem)):
+                sample_loss += loss_elem
+
+        weighted_loss_sum += w_b * (sample_loss / num_targets)
+
+    return weighted_loss_sum / total_weight
+
+
+def compute_roc_auc_column(y_true: List[float], y_score: List[float]) -> float:
+    """
+    Exact Mann-Whitney U / Trapezoidal ROC-AUC calculation for a single target column.
+    """
+    paired = list(zip(y_score, y_true))
+    # Sort descending by score
+    paired.sort(key=lambda x: x[0], reverse=True)
+
+    pos_count = sum(1 for _, y in paired if y >= 0.5)
+    neg_count = len(paired) - pos_count
+
+    if pos_count == 0 or neg_count == 0:
+        return 0.5 # Neutral AUC for zero variance ground truth in mini-split
+
+    tp, fp = 0, 0
+    prev_tp, prev_fp = 0, 0
+    auc = 0.0
+
+    for score, label in paired:
+        if label >= 0.5:
+            tp += 1
+        else:
+            fp += 1
+            # Trapezoidal increment on false positive step
+            auc += (tp + prev_tp) / 2.0
+            prev_tp = tp
+            prev_fp = fp
+
+    return auc / (pos_count * neg_count)
+
+
+def compute_validation_macro_auc(
+    y_true: List[List[float]],
+    y_pred: List[List[float]],
+    target_columns: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Computes validation Macro-AUC per epoch using exact one-vs-rest ROC AUC per column,
+    strictly evaluating: (1/12) * sum(AUC_c).
+    """
+    if not y_true or not y_pred or len(y_true) != len(y_pred):
+        return {"macro_auc": 0.5, "per_column_auc": {}, "num_targets": 0}
+
+    targets = target_columns or TARGET_KEYS
+    num_cols = len(targets)
+    per_column_auc: Dict[str, float] = {}
+    auc_sum = 0.0
+
+    for c_idx, col_name in enumerate(targets):
+        col_true = [y_true[i][c_idx] for i in range(len(y_true))]
+        col_pred = [y_pred[i][c_idx] for i in range(len(y_pred))]
+
+        auc_c = compute_roc_auc_column(col_true, col_pred)
+        per_column_auc[col_name] = round(auc_c, 4)
+        auc_sum += auc_c
+
+    macro_auc = auc_sum / max(1, num_cols)
+
+    return {
+        "macro_auc": round(macro_auc, 5),
+        "per_column_auc": per_column_auc,
+        "num_targets": num_cols,
+        "formula": "(1/12) * sum(AUC_c)"
+    }
+
+
 class AsymmetricLoss:
     """
     Asymmetric Loss (ASL) for Multi-Label Learning with severe negative-positive imbalance.
-    Dynamically down-weights easy negatives and operates with asymmetric focusing parameters (gamma_pos, gamma_neg)
-    and probability margin clipping.
+    Supports sample_weights, probability margin clipping, and asymmetric focusing parameters.
     """
     def __init__(
         self,
@@ -48,7 +171,12 @@ class AsymmetricLoss:
         self.clip = clip
         self.eps = eps
 
-    def compute(self, y_pred: List[List[float]], y_true: List[List[float]]) -> Tuple[float, List[List[float]]]:
+    def compute(
+        self,
+        y_pred: List[List[float]],
+        y_true: List[List[float]],
+        sample_weights: Optional[List[float]] = None
+    ) -> Tuple[float, List[List[float]]]:
         """
         Computes ASL loss and analytical gradients for [Batch, NumTargets] inputs.
         y_pred: Predicted probabilities in range (0, 1)
@@ -60,20 +188,20 @@ class AsymmetricLoss:
             return 0.0, []
 
         num_targets = len(y_pred[0])
+        weights = sample_weights or [1.0] * batch_size
+        total_sample_weight = sum(weights) or 1.0
+
         total_loss = 0.0
         grads: List[List[float]] = []
 
         for b in range(batch_size):
+            w_b = weights[b]
             b_grads: List[float] = []
             for t in range(num_targets):
                 p = max(self.eps, min(1.0 - self.eps, y_pred[b][t]))
                 y = y_true[b][t]
-
-                # Asymmetric margin shifted probability for negatives
                 p_m = max(0.0, p - self.clip) if self.clip > 0 else p
 
-                # Positive loss: - (1 - p)^gamma_pos * log(p)
-                # Negative loss: - (p_m)^gamma_neg * log(1 - p_m)
                 if y >= 0.5:
                     pt = p
                     focal_factor = (1.0 - pt) ** self.gamma_pos
@@ -91,17 +219,16 @@ class AsymmetricLoss:
                         + (pt_neg ** self.gamma_neg) / max(self.eps, 1.0 - pt_neg)
                     )
 
-                # Check for NaN / Inf protection
                 if math.isnan(loss_elem) or math.isinf(loss_elem):
                     loss_elem = 0.0
                 if math.isnan(grad_elem) or math.isinf(grad_elem):
                     grad_elem = 0.0
 
-                total_loss += loss_elem
-                b_grads.append(grad_elem / (batch_size * num_targets))
+                total_loss += w_b * loss_elem
+                b_grads.append(w_b * grad_elem / (batch_size * num_targets))
             grads.append(b_grads)
 
-        avg_loss = total_loss / (batch_size * num_targets)
+        avg_loss = total_loss / (total_sample_weight * num_targets)
         return avg_loss, grads
 
 
@@ -181,11 +308,9 @@ class AUCSurrogateLoss:
             for n_idx in neg_indices:
                 s_neg = y_pred_single_target[n_idx]
                 diff = (s_neg - s_pos) / self.temperature
-                # Sigmoid pairwise loss
                 sig = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, diff))))
                 total_loss += sig
 
-                # Derivative wrt scores
                 d_sig = (sig * (1.0 - sig)) / self.temperature
                 grads[p_idx] -= d_sig / (n_pos * n_neg)
                 grads[n_idx] += d_sig / (n_pos * n_neg)
@@ -196,7 +321,7 @@ class AUCSurrogateLoss:
 
 class MultiTaskCompositeLoss:
     """
-    Composite Multi-Task loss uniting Asymmetric Loss, Focal Loss, and AUC Surrogate Loss
+    Composite Multi-Task loss uniting Sample-Weighted Asymmetric Loss, Focal Loss, and AUC Surrogate Loss
     across all 12 independent binary classification heads.
     Guarantees zero NaN/Inf gradient propagation.
     """
@@ -218,15 +343,15 @@ class MultiTaskCompositeLoss:
     def compute(
         self,
         predictions: List[List[float]],
-        ground_truth: List[List[float]]
+        ground_truth: List[List[float]],
+        sample_weights: Optional[List[float]] = None
     ) -> Dict[str, Any]:
         """
         Calculates weighted composite multi-task loss and per-head gradient vectors.
         """
-        asl_loss, asl_grads = self.asl.compute(predictions, ground_truth)
+        asl_loss, asl_grads = self.asl.compute(predictions, ground_truth, sample_weights)
         focal_loss, focal_grads = self.focal.compute(predictions, ground_truth)
 
-        # Compute per-target AUC surrogate loss
         batch_size = len(predictions)
         num_targets = len(predictions[0])
         auc_loss_sum = 0.0
@@ -242,14 +367,12 @@ class MultiTaskCompositeLoss:
 
         avg_auc_loss = auc_loss_sum / max(1, num_targets)
 
-        # Composite Loss
         composite_loss = (
             self.asl_weight * asl_loss
             + self.focal_weight * focal_loss
             + self.auc_weight * avg_auc_loss
         )
 
-        # Composite Gradients
         combined_grads: List[List[float]] = []
         has_nan_inf = False
 
@@ -277,3 +400,21 @@ class MultiTaskCompositeLoss:
             "hasNaNInf": has_nan_inf,
             "targetsVerified": len(TARGET_KEYS)
         }
+
+
+if __name__ == "__main__":
+    preds = [
+        [0.90, 0.10, 0.85, 0.05, 0.10, 0.05, 0.10, 0.88, 0.12, 0.05, 0.80, 0.02],
+        [0.10, 0.85, 0.15, 0.90, 0.80, 0.10, 0.75, 0.90, 0.82, 0.88, 0.05, 0.01]
+    ]
+    gt = [
+        [1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0]
+    ]
+    sample_weights = [1.0, 0.70] # 1.0 = Ground truth, 0.70 = Pseudo-labeled
+
+    asl_val = weighted_bce_asl(preds, gt, sample_weights)
+    print(f"Sample-Weighted ASL Loss: {asl_val:.5f}")
+
+    macro_auc_res = compute_validation_macro_auc(gt, preds)
+    print(f"Validation Macro-AUC: {macro_auc_res['macro_auc']} across {macro_auc_res['num_targets']} columns.")

@@ -1,0 +1,20 @@
+[
+  "tests/test_multiplanar_loader_audit.py::TestInPlanePhysicalFOVNormalization::test_crop_dimension_evaluation",
+  "tests/test_multiplanar_loader_audit.py::TestInPlanePhysicalFOVNormalization::test_out_of_bounds_zero_padding",
+  "tests/test_multiplanar_loader_audit.py::TestInPlanePhysicalFOVNormalization::test_output_tensor_resolution_and_value_bounds",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalCoordinateProjectionAndNormal::test_monotonic_slice_sorting_from_shuffled_dicom",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalCoordinateProjectionAndNormal::test_normal_vector_cross_product_and_unit_norm",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalCoordinateProjectionAndNormal::test_scalar_projection_math",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalSpanPercentileGating::test_boundary_slices_discarded",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalSpanPercentileGating::test_exact_slice_budgets_returned[Axial-14]",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalSpanPercentileGating::test_exact_slice_budgets_returned[Coronal-18]",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalSpanPercentileGating::test_exact_slice_budgets_returned[Sagittal-20]",
+  "tests/test_multiplanar_loader_audit.py::TestPhysicalSpanPercentileGating::test_exact_slice_budgets_returned[T1-12]",
+  "tests/test_multiplanar_loader_audit.py::TestSyntheticDICOMGeneration::test_dicom_orientation_cosines",
+  "tests/test_multiplanar_loader_audit.py::TestSyntheticDICOMGeneration::test_mock_dicom_volume_structure[Axial]",
+  "tests/test_multiplanar_loader_audit.py::TestSyntheticDICOMGeneration::test_mock_dicom_volume_structure[Coronal]",
+  "tests/test_multiplanar_loader_audit.py::TestSyntheticDICOMGeneration::test_mock_dicom_volume_structure[Sagittal]",
+  "tests/test_multiplanar_loader_audit.py::TestWindowing25DAndBatchShapes::test_batch_tensor_collation_and_forward_pass",
+  "tests/test_multiplanar_loader_audit.py::TestWindowing25DAndBatchShapes::test_edge_reflection_padding_in_sliding_windows",
+  "tests/test_multiplanar_loader_audit.py::TestWindowing25DAndBatchShapes::test_study_windows_assembly_shape_52_and_64"
+]
